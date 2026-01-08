@@ -42,6 +42,10 @@ export const AdminAuthProvider = ({ children }) => {
   const [initializing, setInitializing] = useState(true);
   const navigate = useNavigate();
 
+  // STEP 2.3: 2FA State (Hidden by Default)
+  const [requires2FA, setRequires2FA] = useState(false);
+  const [pending2FAUser, setPending2FAUser] = useState(null); // User waiting for 2FA verification
+
   // Current session tracking
   const currentSessionId = useRef(null);
 
@@ -378,6 +382,11 @@ export const AdminAuthProvider = ({ children }) => {
     isAnalyst,
     forceLogoutUser,
     checkSessionRevocation,
+    // STEP 2.3: 2FA Support (Hidden by Default)
+    requires2FA,
+    setRequires2FA,
+    pending2FAUser,
+    setPending2FAUser,
   };
 
   return (
