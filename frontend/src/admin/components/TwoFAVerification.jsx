@@ -11,20 +11,19 @@ import { useState } from "react";
  * - Auto-submits when 6 digits entered
  * - Handles rate limiting (try again later)
  * - Shows attempt count
+ * 
+ * @param {Object} props
+ * @param {() => void} props.onSuccess - Called when 2FA verification succeeds
+ * @param {() => void} props.onCancel - Called when user cancels verification
  */
-
-interface TwoFAVerificationProps {
-  onSuccess: () => void;
-  onCancel: () => void;
-}
 
 export function TwoFAVerification({
   onSuccess,
   onCancel,
-}: TwoFAVerificationProps) {
+}) {
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(null);
   const [attempts, setAttempts] = useState(3);
   const [isLocked, setIsLocked] = useState(false);
 
@@ -32,7 +31,7 @@ export function TwoFAVerification({
    * Handle user typing/pasting code
    * Only allows digits, max 6 characters
    */
-  const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCodeChange = (e) => {
     const value = e.target.value.replace(/\D/g, "").slice(0, 6);
     setCode(value);
 
@@ -45,7 +44,7 @@ export function TwoFAVerification({
   /**
    * Verify 2FA code with backend
    */
-  const verifyCode = async (codeToVerify: string) => {
+  const verifyCode = async (codeToVerify) => {
     if (isLocked) return;
 
     try {
