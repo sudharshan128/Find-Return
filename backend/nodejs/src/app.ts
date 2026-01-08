@@ -1,0 +1,115 @@
+import express, { Express, Request, Response, NextFunction } from "express";
+import cors from "cors";
+import helmet from "helmet";
+import { generalLimiter } from "./middleware/rateLimit";
+import authRoutes from "./routes/auth.routes";
+import adminRoutes from "./routes/admin.routes";
+import twoFARoutes from "./routes/twofa.routes";
+
+/**
+ * EXPRESS APPLICATION SETUP
+ * SECURITY-FIRST ARCHITECTURE
+ */
+
+export function createApp(): Express {
+  const app = express();
+
+  // ============================================
+  // SECURITY MIDDLEWARE
+  // ============================================
+
+  // Helmet - Set security HTTP headers
+  app.use(helmet());
+
+  // CORS - Lock to frontend origin
+  const allowedOrigins = [
+    process.env.FRONTEND_URL || "http://localhost:5174",
+    process.env.FRONTEND_ORIGIN || "http://localhost:5174",
+  ];
+
+  app.use(
+    cors({
+      origin: allowedOrigins,
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization"],
+      maxAge: 3600,
+    })
+  );
+
+  // Body parsing with size limit
+  app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ limit: "10mb", extended: true }));
+
+  // General rate limiting
+  app.use(generalLimiter);
+
+  // ============================================
+  // LOGGING MIDDLEWARE
+  // ============================================
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const startTime = Date.now();
+
+    // Log response when sent
+    res.on("finish", () => {
+      const duration = Date.now() - startTime;
+      const logLevel = res.statusCode >= 400 ? "[ERROR]" : "[INFO]";
+      console.log(
+        `${logLevel} ${req.method} ${req.path} - Status: ${res.statusCode} - ${duration}ms`
+      );
+    });
+
+    next();
+  });
+
+  // ============================================
+  // HEALTH CHECK
+  // ============================================
+  app.get("/health", (_req: Request, res: Response) => {
+    res.json({
+      status: "healthy",
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  // ============================================
+  // API ROUTES
+  // ============================================
+
+  // Authentication routes
+  app.use("/api/admin/auth", authRoutes);
+
+  // Admin routes
+  app.use("/api/admin", adminRoutes);
+
+  // 2FA routes
+  app.use("/api/admin/2fa", twoFARoutes);
+
+  // ============================================
+  // 404 HANDLER
+  // ============================================
+  app.use((req: Request, res: Response) => {
+    res.status(404).json({
+      error: "Not found",
+      code: "NOT_FOUND",
+      path: req.path,
+    });
+  });
+
+  // ============================================
+  // ERROR HANDLER
+  // ============================================
+  app.use((_err: any, _req: Request, _res: Response, _next: NextFunction) => {
+    console.error("[ERROR]", _err);
+
+    const statusCode = _err.statusCode || 500;
+    const message = _err.message || "Internal server error";
+
+    _res.status(statusCode).json({
+      error: message,
+      code: _err.code || "SERVER_ERROR",
+    });
+  });
+
+  return app;
+}

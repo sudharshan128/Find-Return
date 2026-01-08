@@ -1,0 +1,1181 @@
+/**
+ * Supabase Client Configuration
+ * Lost & Found Bangalore
+ */
+
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Supabase config missing:', { url: !!supabaseUrl, key: !!supabaseAnonKey });
+  throw new Error('Missing Supabase environment variables');
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true,
+  },
+  realtime: {
+    params: {
+      eventsPerSecond: 10,
+    },
+  },
+});
+
+// Helper: Generate public URL from storage_bucket and storage_path
+export const getImageUrl = (image) => {
+  if (!image) return null;
+  
+  // If image already has a full URL (legacy data), use it
+  if (image.image_url) return image.image_url;
+  
+  // Generate URL from storage_bucket and storage_path
+  if (image.storage_bucket && image.storage_path) {
+    const { data } = supabase.storage
+      .from(image.storage_bucket)
+      .getPublicUrl(image.storage_path);
+    return data?.publicUrl || null;
+  }
+  
+  return null;
+};
+
+// Helper: Get primary image URL from images array
+export const getPrimaryImageUrl = (images) => {
+  if (!images || images.length === 0) return null;
+  
+  const primaryImage = images.find(img => img.is_primary) || images[0];
+  return getImageUrl(primaryImage);
+};
+
+// Auth helpers
+export const auth = {
+  // Sign in with Google
+  signInWithGoogle: async () => {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
+        },
+      },
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  // Sign out
+  signOut: async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+  },
+
+  // Get current user
+  getUser: async () => {
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error) throw error;
+    return user;
+  },
+
+  // Get session
+  getSession: async () => {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    return session;
+  },
+
+  // Listen to auth changes
+  onAuthStateChange: (callback) => {
+    return supabase.auth.onAuthStateChange(callback);
+  },
+};
+
+// Database helpers
+export const db = {
+  // User Profiles (using new schema)
+  users: {
+    get: async (userId) => {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+
+    getCurrent: async () => {
+      const user = await auth.getUser();
+      if (!user) return null;
+      return db.users.get(user.id);
+    },
+
+    update: async (userId, updates) => {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .update(updates)
+        .eq('user_id', userId)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+
+    getStats: async (userId) => {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('items_found_count, items_returned_count, claims_made_count, successful_claims_count, trust_score')
+        .eq('user_id', userId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+
+    // Get rate limit status for a user
+    getRateLimitStatus: async (userId, actionType) => {
+      const { data, error } = await supabase
+        .from('rate_limits')
+        .select('count, window_start')
+        .eq('user_id', userId)
+        .eq('action_type', actionType)
+        .single();
+      
+      if (error && error.code !== 'PGRST116') throw error; // PGRST116 = not found
+      
+      return data || { count: 0, window_start: new Date().toISOString() };
+    },
+  },
+
+  // Categories
+  categories: {
+    getAll: async () => {
+      const { data, error } = await supabase
+        .from('categories')
+        .select('*')
+        .eq('is_active', true)
+        .order('display_order');
+      if (error) throw error;
+      return data || [];
+    },
+  },
+
+  // Areas
+  areas: {
+    getAll: async () => {
+      const { data, error } = await supabase
+        .from('areas')
+        .select('*')
+        .eq('is_active', true)
+        .order('name');
+      if (error) throw error;
+      return data || [];
+    },
+
+    getByZone: async (zone) => {
+      const { data, error } = await supabase
+        .from('areas')
+        .select('*')
+        .eq('zone', zone)
+        .eq('is_active', true)
+        .order('name');
+      if (error) throw error;
+      return data || [];
+    },
+  },
+
+  // Items
+  items: {
+    create: async (itemData) => {
+      console.log('[db.items.create] Starting item creation...');
+      
+      // Extract images array - it goes in item_images table, not items
+      const { images, ...itemPayload } = itemData;
+      
+      console.log('[db.items.create] Item payload:', JSON.stringify(itemPayload, null, 2));
+      console.log('[db.items.create] Images to save:', images?.length || 0);
+      
+      // Insert item first with timeout
+      const insertPromise = supabase
+        .from('items')
+        .insert(itemPayload)
+        .select()
+        .single();
+      
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Database insert timeout: operation took longer than 15 seconds')), 15000);
+      });
+      
+      console.log('[db.items.create] Inserting item into database...');
+      const { data, error } = await Promise.race([insertPromise, timeoutPromise]);
+      
+      if (error) {
+        console.error('[db.items.create] Supabase items insert error:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+        });
+        throw error;
+      }
+      
+      console.log('[db.items.create] Item created successfully with ID:', data?.id);
+      
+      // Insert images into item_images table if provided
+      // Actual schema: item_id, storage_bucket, storage_path, image_url, is_primary, sort_order
+      if (images && images.length > 0 && data?.id) {
+        console.log('[db.items.create] Inserting', images.length, 'images into item_images table...');
+        
+        const imageRecords = images.map((publicUrl, index) => {
+          // Extract storage_path from public URL
+          // URL format: https://<project>.supabase.co/storage/v1/object/public/item-images/<path>
+          const pathMatch = publicUrl.match(/\/item-images\/(.+)$/);
+          const storagePath = pathMatch ? pathMatch[1] : publicUrl;
+          
+          return {
+            item_id: data.id,
+            storage_bucket: 'item-images',
+            storage_path: storagePath,
+            image_url: publicUrl,  // Full public URL (required column)
+            is_primary: index === 0,
+            sort_order: index,
+          };
+        });
+        
+        console.log('[db.items.create] Image records to insert:', imageRecords);
+        
+        const imgInsertPromise = supabase
+          .from('item_images')
+          .insert(imageRecords);
+        
+        const imgTimeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Image records insert timeout')), 10000);
+        });
+        
+        try {
+          const { error: imgError } = await Promise.race([imgInsertPromise, imgTimeoutPromise]);
+          
+          if (imgError) {
+            console.error('[db.items.create] Failed to insert item images:', imgError);
+            // Don't throw - item was created, images just failed
+          } else {
+            console.log('[db.items.create] Images saved successfully');
+          }
+        } catch (imgErr) {
+          console.error('[db.items.create] Image insert error:', imgErr);
+        }
+      }
+      
+      console.log('[db.items.create] Complete! Returning data');
+      return data;
+    },
+
+    get: async (itemId) => {
+      const { data, error } = await supabase
+        .from('items')
+        .select(`
+          *,
+          category:categories(*),
+          area:areas(*),
+          finder:user_profiles!items_finder_id_fkey(user_id, full_name, avatar_url, trust_score, items_returned_count),
+          images:item_images(*)
+        `)
+        .eq('id', itemId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+
+    search: async (filters = {}) => {
+      try {
+        let query = supabase
+          .from('items')
+          .select(`
+            *,
+            category:categories(name, icon),
+            area:areas(name, zone),
+            images:item_images(id, image_url, storage_bucket, storage_path, is_primary)
+          `, { count: 'exact' });
+
+        // Filter by status - 'unclaimed' UI maps to 'active' in DB
+        if (filters.status === 'unclaimed' || filters.status === 'active') {
+          query = query.eq('status', 'active');
+        } else if (filters.status) {
+          query = query.eq('status', filters.status);
+        }
+
+        // Category filter
+        if (filters.categoryId) {
+          query = query.eq('category_id', filters.categoryId);
+        }
+
+        // Area filter
+        if (filters.areaId) {
+          query = query.eq('area_id', filters.areaId);
+        }
+
+        // Text search
+        if (filters.search) {
+          query = query.or(`title.ilike.%${filters.search}%,description.ilike.%${filters.search}%`);
+        }
+
+        // Pagination and ordering
+        query = query
+          .order('created_at', { ascending: false })
+          .range(filters.offset || 0, (filters.offset || 0) + (filters.limit || 20) - 1);
+
+        const { data, error, count } = await query;
+        
+        if (error) throw error;
+        return { data: data || [], count: count || 0 };
+      } catch (err) {
+        console.error('Search error:', err);
+        throw err;
+      }
+    },
+
+    getByUser: async (userId) => {
+      const { data, error } = await supabase
+        .from('items')
+        .select(`
+          *,
+          category:categories(name, icon),
+          area:areas(name),
+          images:item_images(id, image_url, storage_bucket, storage_path, is_primary)
+        `)
+        .eq('finder_id', userId)
+        .neq('status', 'removed')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+
+    update: async (itemId, updates) => {
+      const { data, error } = await supabase
+        .from('items')
+        .update(updates)
+        .eq('id', itemId)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+
+    delete: async (itemId) => {
+      const { error } = await supabase
+        .from('items')
+        .update({ status: 'removed' })
+        .eq('id', itemId);
+      if (error) throw error;
+    },
+
+    // Mark item as returned (handover complete)
+    markReturned: async (itemId, claimId = null) => {
+      // Update item status
+      const { data: itemData, error: itemError } = await supabase
+        .from('items')
+        .update({ 
+          status: 'returned',
+          returned_at: new Date().toISOString()
+        })
+        .eq('id', itemId)
+        .select()
+        .single();
+      if (itemError) throw itemError;
+      
+      // If claim ID provided, update claim status to returned
+      if (claimId) {
+        const { error: claimError } = await supabase
+          .from('claims')
+          .update({ 
+            status: 'returned',
+            completed_at: new Date().toISOString()
+          })
+          .eq('id', claimId);
+        if (claimError) console.error('Failed to update claim status:', claimError);
+      }
+      
+      return itemData;
+    },
+
+    incrementView: async (itemId) => {
+      const { error } = await supabase.rpc('increment_view_count', { p_item_id: itemId });
+      if (error) console.error('Failed to increment view count:', error);
+    },
+
+    // Get user's daily upload count
+    getUserDailyUploadCount: async (userId) => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const { count, error } = await supabase
+        .from('items')
+        .select('*', { count: 'exact', head: true })
+        .eq('finder_id', userId)
+        .gte('created_at', today.toISOString());
+      
+      if (error) throw error;
+      return count || 0;
+    },
+  },
+
+  // Item Images (separate table)
+  itemImages: {
+    create: async (imageData) => {
+      const { data, error } = await supabase
+        .from('item_images')
+        .insert(imageData)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+
+    createMany: async (images) => {
+      const { data, error } = await supabase
+        .from('item_images')
+        .insert(images)
+        .select();
+      if (error) throw error;
+      return data;
+    },
+
+    getForItem: async (itemId) => {
+      const { data, error } = await supabase
+        .from('item_images')
+        .select('*')
+        .eq('item_id', itemId)
+        .order('sort_order');
+      if (error) throw error;
+      return data || [];
+    },
+
+    delete: async (imageId) => {
+      const { error } = await supabase
+        .from('item_images')
+        .delete()
+        .eq('id', imageId);
+      if (error) throw error;
+    },
+
+    setPrimary: async (imageId, itemId) => {
+      // First unset all as primary
+      await supabase
+        .from('item_images')
+        .update({ is_primary: false })
+        .eq('item_id', itemId);
+      
+      // Then set the selected one
+      const { error } = await supabase
+        .from('item_images')
+        .update({ is_primary: true })
+        .eq('id', imageId);
+      if (error) throw error;
+    },
+  },
+
+  // Note: Images are now stored in item_images table
+
+  // Claims
+  claims: {
+    create: async (claimData) => {
+      const { data, error } = await supabase
+        .from('claims')
+        .insert(claimData)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+
+    getForItem: async (itemId) => {
+      const { data, error } = await supabase
+        .from('claims')
+        .select(`
+          *,
+          claimant:user_profiles!claims_claimant_id_fkey(user_id, full_name, avatar_url, trust_score)
+        `)
+        .eq('item_id', itemId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+
+    getByUser: async (userId) => {
+      const { data, error } = await supabase
+        .from('claims')
+        .select(`
+          *,
+          item:items(
+            id, 
+            title, 
+            status, 
+            finder_id,
+            images:item_images(id, image_url, storage_bucket, storage_path, is_primary)
+          )
+        `)
+        .eq('claimant_id', userId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+
+    getUserClaimCount: async (itemId, userId) => {
+      const { count, error } = await supabase
+        .from('claims')
+        .select('*', { count: 'exact', head: true })
+        .eq('item_id', itemId)
+        .eq('claimant_id', userId);
+      if (error) throw error;
+      return count || 0;
+    },
+
+    // Get user's daily claim count
+    getUserDailyClaimCount: async (userId) => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const { count, error } = await supabase
+        .from('claims')
+        .select('*', { count: 'exact', head: true })
+        .eq('claimant_id', userId)
+        .gte('created_at', today.toISOString());
+      
+      if (error) throw error;
+      return count || 0;
+    },
+
+    updateStatus: async (claimId, status, rejectionReason = null) => {
+      const updates = { status };
+      if (rejectionReason) {
+        updates.rejection_reason = rejectionReason;
+      }
+      if (status === 'approved') {
+        updates.approved_at = new Date().toISOString();
+      }
+      if (status === 'rejected') {
+        updates.rejected_at = new Date().toISOString();
+      }
+      const { data, error } = await supabase
+        .from('claims')
+        .update(updates)
+        .eq('id', claimId)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+
+    withdraw: async (claimId) => {
+      const { data, error } = await supabase
+        .from('claims')
+        .update({ status: 'withdrawn' })
+        .eq('id', claimId)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+  },
+
+  // Chats
+  chats: {
+    create: async (chatData) => {
+      const { data, error } = await supabase
+        .from('chats')
+        .insert(chatData)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+
+    getOrCreate: async (itemId, claimId, finderId, claimantId) => {
+      // First try to find existing chat
+      const { data: existingChat } = await supabase
+        .from('chats')
+        .select('*')
+        .eq('item_id', itemId)
+        .eq('claim_id', claimId)
+        .single();
+      
+      if (existingChat) return existingChat;
+      
+      // Create new chat
+      const { data, error } = await supabase
+        .from('chats')
+        .insert({
+          item_id: itemId,
+          claim_id: claimId,
+          finder_id: finderId,
+          claimant_id: claimantId,
+          is_active: true,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+
+    getForUser: async (userId) => {
+      const { data, error } = await supabase
+        .from('chats')
+        .select(`
+          *,
+          item:items(
+            id, 
+            title,
+            images:item_images(id, image_url, storage_bucket, storage_path, is_primary)
+          ),
+          messages:messages(id, message, created_at, sender_id, is_read)
+        `)
+        .or(`finder_id.eq.${userId},claimant_id.eq.${userId}`)
+        .order('updated_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+
+    get: async (chatId) => {
+      const { data, error } = await supabase
+        .from('chats')
+        .select(`
+          *,
+          item:items(id, title, finder_id),
+          claim:claims(id, claimant_id)
+        `)
+        .eq('id', chatId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+
+    close: async (chatId, reason) => {
+      const user = await auth.getUser();
+      const { error } = await supabase
+        .from('chats')
+        .update({ 
+          is_closed: true, 
+          closed_at: new Date().toISOString(),
+          closed_by: user.id,
+          close_reason: reason,
+        })
+        .eq('id', chatId);
+      if (error) throw error;
+    },
+
+    markRead: async (chatId, userId, isFinder) => {
+      const field = isFinder ? 'finder_unread_count' : 'claimant_unread_count';
+      const { error } = await supabase
+        .from('chats')
+        .update({ [field]: 0 })
+        .eq('id', chatId);
+      if (error) throw error;
+    },
+  },
+
+  // Messages
+  messages: {
+    getForChat: async (chatId, limit = 50) => {
+      const { data, error } = await supabase
+        .from('messages')
+        .select(`
+          *,
+          sender:user_profiles!messages_sender_id_fkey(user_id, full_name, avatar_url)
+        `)
+        .eq('chat_id', chatId)
+        .eq('is_deleted', false)
+        .order('created_at', { ascending: true })
+        .limit(limit);
+      if (error) throw error;
+      return data || [];
+    },
+
+    send: async (chatId, senderId, content) => {
+      const { data, error } = await supabase
+        .from('messages')
+        .insert({
+          chat_id: chatId,
+          sender_id: senderId,
+          message_text: content,
+          message_type: 'text',
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+
+    markRead: async (chatId, userId) => {
+      const { error } = await supabase
+        .from('messages')
+        .update({ is_read: true, read_at: new Date().toISOString() })
+        .eq('chat_id', chatId)
+        .neq('sender_id', userId)
+        .eq('is_read', false);
+      if (error) throw error;
+    },
+  },
+
+  // Reports (abuse_reports table)
+  reports: {
+    create: async (reportData) => {
+      const { data, error } = await supabase
+        .from('abuse_reports')
+        .insert(reportData)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+
+    getAll: async (status = null) => {
+      let query = supabase
+        .from('abuse_reports')
+        .select(`
+          *,
+          reporter:user_profiles!abuse_reports_reporter_id_fkey(user_id, full_name, email),
+          target_user:user_profiles!abuse_reports_target_user_id_fkey(user_id, full_name, email),
+          target_item:items!abuse_reports_target_item_id_fkey(id, title)
+        `)
+        .order('created_at', { ascending: false });
+      
+      if (status) {
+        query = query.eq('status', status);
+      }
+      
+      const { data, error } = await query;
+      if (error) throw error;
+      return data || [];
+    },
+
+    updateStatus: async (reportId, status, adminNotes, actionTaken) => {
+      const user = await auth.getUser();
+      const { error } = await supabase
+        .from('abuse_reports')
+        .update({ 
+          status, 
+          admin_notes: adminNotes,
+          action_taken: actionTaken,
+          reviewed_by: user.id,
+          reviewed_at: new Date().toISOString(),
+        })
+        .eq('id', reportId);
+      if (error) throw error;
+    },
+
+    getStats: async () => {
+      const { data, error } = await supabase
+        .from('abuse_reports')
+        .select('status')
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      
+      const stats = {
+        total: data?.length || 0,
+        pending: data?.filter(r => r.status === 'pending').length || 0,
+        reviewing: data?.filter(r => r.status === 'reviewing').length || 0,
+        resolved: data?.filter(r => r.status === 'resolved').length || 0,
+        dismissed: data?.filter(r => r.status === 'dismissed').length || 0,
+      };
+      
+      return stats;
+    },
+  },
+
+  // Audit Logs
+  auditLogs: {
+    create: async (logData) => {
+      const { error } = await supabase
+        .from('audit_logs')
+        .insert(logData);
+      if (error) console.error('Failed to create audit log:', error);
+    },
+
+    getForEntity: async (entityType, entityId) => {
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .eq('entity_type', entityType)
+        .eq('entity_id', entityId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+
+    getRecent: async (limit = 20) => {
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select(`
+          *,
+          user:user_profiles!audit_logs_user_id_fkey(user_id, full_name)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      return data || [];
+    },
+  },
+
+  // Admin stats
+  admin: {
+    getStats: async () => {
+      // Get item counts
+      const { count: totalItems } = await supabase
+        .from('items')
+        .select('*', { count: 'exact', head: true })
+        .neq('status', 'removed');
+
+      const { count: activeItems } = await supabase
+        .from('items')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'active');
+
+      const { count: claimedItems } = await supabase
+        .from('items')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'claimed');
+
+      const { count: returnedItems } = await supabase
+        .from('items')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'returned');
+
+      const { count: flaggedItems } = await supabase
+        .from('items')
+        .select('*', { count: 'exact', head: true })
+        .eq('is_flagged', true);
+
+      // Get user counts
+      const { count: totalUsers } = await supabase
+        .from('user_profiles')
+        .select('*', { count: 'exact', head: true });
+
+      const { count: activeUsers } = await supabase
+        .from('user_profiles')
+        .select('*', { count: 'exact', head: true })
+        .eq('account_status', 'active');
+
+      const { count: bannedUsers } = await supabase
+        .from('user_profiles')
+        .select('*', { count: 'exact', head: true })
+        .eq('account_status', 'banned');
+
+      // Get pending reports
+      const { count: pendingReports } = await supabase
+        .from('abuse_reports')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending');
+
+      // Get pending claims
+      const { count: pendingClaims } = await supabase
+        .from('claims')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending');
+
+      return {
+        items: {
+          total: totalItems || 0,
+          active: activeItems || 0,
+          claimed: claimedItems || 0,
+          returned: returnedItems || 0,
+          flagged: flaggedItems || 0,
+        },
+        users: {
+          total: totalUsers || 0,
+          active: activeUsers || 0,
+          banned: bannedUsers || 0,
+        },
+        pendingReports: pendingReports || 0,
+        pendingClaims: pendingClaims || 0,
+      };
+    },
+
+    // Get all items for admin
+    getAllItems: async (filters = {}) => {
+      let query = supabase
+        .from('items')
+        .select(`
+          *,
+          category:categories(name, icon),
+          area:areas(name),
+          finder:user_profiles!items_finder_id_fkey(user_id, full_name, email),
+          images:item_images(id, image_url, storage_bucket, storage_path, is_primary)
+        `, { count: 'exact' });
+
+      if (filters.status && filters.status !== 'all') {
+        query = query.eq('status', filters.status);
+      }
+
+      if (filters.flagged) {
+        query = query.eq('is_flagged', true);
+      }
+
+      query = query
+        .order('created_at', { ascending: false })
+        .range(filters.offset || 0, (filters.offset || 0) + (filters.limit || 20) - 1);
+
+      const { data, error, count } = await query;
+      if (error) throw error;
+      return { data: data || [], count: count || 0 };
+    },
+
+    // Get all users for admin
+    getAllUsers: async (filters = {}) => {
+      let query = supabase
+        .from('user_profiles')
+        .select('*', { count: 'exact' });
+
+      if (filters.status && filters.status !== 'all') {
+        query = query.eq('account_status', filters.status);
+      }
+
+      if (filters.role && filters.role !== 'all') {
+        query = query.eq('role', filters.role);
+      }
+
+      query = query
+        .order('created_at', { ascending: false })
+        .range(filters.offset || 0, (filters.offset || 0) + (filters.limit || 20) - 1);
+
+      const { data, error, count } = await query;
+      if (error) throw error;
+      return { data: data || [], count: count || 0 };
+    },
+
+    // Flag/unflag item
+    flagItem: async (itemId, reason) => {
+      const user = await auth.getUser();
+      const { error } = await supabase
+        .from('items')
+        .update({
+          is_flagged: true,
+          flag_reason: reason,
+          flagged_by: user.id,
+          flagged_at: new Date().toISOString(),
+        })
+        .eq('id', itemId);
+      if (error) throw error;
+    },
+
+    unflagItem: async (itemId) => {
+      const { error } = await supabase
+        .from('items')
+        .update({
+          is_flagged: false,
+          flag_reason: null,
+          flagged_by: null,
+          flagged_at: null,
+        })
+        .eq('id', itemId);
+      if (error) throw error;
+    },
+
+    // Ban/unban user
+    banUser: async (userId, reason) => {
+      const admin = await auth.getUser();
+      const { error } = await supabase
+        .from('user_profiles')
+        .update({
+          account_status: 'banned',
+          ban_reason: reason,
+          banned_at: new Date().toISOString(),
+          banned_by: admin.id,
+        })
+        .eq('user_id', userId);
+      if (error) throw error;
+    },
+
+    unbanUser: async (userId) => {
+      const { error } = await supabase
+        .from('user_profiles')
+        .update({
+          account_status: 'active',
+          ban_reason: null,
+          banned_at: null,
+          banned_by: null,
+        })
+        .eq('user_id', userId);
+      if (error) throw error;
+    },
+  },
+};
+
+// Storage helpers
+export const storage = {
+  // Upload item image with timeout protection
+  uploadItemImage: async (file, userId) => {
+    console.log('[storage.uploadItemImage] Starting upload for:', file.name);
+    console.log('[storage.uploadItemImage] File size:', file.size, 'bytes');
+    console.log('[storage.uploadItemImage] User ID:', userId);
+    
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${userId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    console.log('[storage.uploadItemImage] Target path:', fileName);
+    
+    // Add timeout protection (20 seconds)
+    const uploadPromise = supabase.storage
+      .from('item-images')
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+    
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Upload timeout: operation took longer than 20 seconds')), 20000);
+    });
+    
+    console.log('[storage.uploadItemImage] Calling Supabase storage upload...');
+    let result;
+    try {
+      result = await Promise.race([uploadPromise, timeoutPromise]);
+    } catch (err) {
+      console.error('[storage.uploadItemImage] Promise.race error:', err);
+      throw err;
+    }
+    
+    console.log('[storage.uploadItemImage] Upload response:', result);
+    const { data, error } = result;
+    
+    if (error) {
+      console.error('[storage.uploadItemImage] Storage upload error:', {
+        message: error.message,
+        statusCode: error.statusCode,
+        error: error.error,
+      });
+      throw error;
+    }
+    
+    if (!data?.path) {
+      console.error('[storage.uploadItemImage] No path in response!', data);
+      throw new Error('Upload failed: no path returned');
+    }
+    
+    console.log('[storage.uploadItemImage] Upload successful, path:', data.path);
+    
+    const { data: { publicUrl } } = supabase.storage
+      .from('item-images')
+      .getPublicUrl(data.path);
+    
+    console.log('[storage.uploadItemImage] Public URL:', publicUrl);
+    
+    return {
+      path: data.path,
+      publicUrl,
+    };
+  },
+
+  // Upload claim proof image
+  uploadClaimImage: async (file, userId) => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${userId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    
+    const { data, error } = await supabase.storage
+      .from('claims')
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+    
+    if (error) throw error;
+    
+    const { data: { publicUrl } } = supabase.storage
+      .from('claims')
+      .getPublicUrl(data.path);
+    
+    return {
+      path: data.path,
+      publicUrl,
+    };
+  },
+
+  // Upload avatar
+  uploadAvatar: async (file, userId) => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${userId}/avatar.${fileExt}`;
+    
+    const { data, error } = await supabase.storage
+      .from('avatars')
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: true,
+      });
+    
+    if (error) throw error;
+    
+    const { data: { publicUrl } } = supabase.storage
+      .from('avatars')
+      .getPublicUrl(data.path);
+    
+    return {
+      path: data.path,
+      publicUrl,
+    };
+  },
+
+  // Delete image
+  deleteImage: async (bucket, path) => {
+    const { error } = await supabase.storage
+      .from(bucket)
+      .remove([path]);
+    if (error) throw error;
+  },
+
+  // Get signed URL for private images
+  getSignedUrl: async (bucket, path, expiresIn = 3600) => {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(path, expiresIn);
+    if (error) throw error;
+    return data.signedUrl;
+  },
+};
+
+// Realtime subscriptions
+export const realtime = {
+  // Subscribe to chat messages
+  subscribeToChat: (chatId, callback) => {
+    return supabase
+      .channel(`chat:${chatId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `chat_id=eq.${chatId}`,
+        },
+        callback
+      )
+      .subscribe();
+  },
+
+  // Subscribe to item claims
+  subscribeToClaims: (itemId, callback) => {
+    return supabase
+      .channel(`claims:${itemId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'claims',
+          filter: `item_id=eq.${itemId}`,
+        },
+        callback
+      )
+      .subscribe();
+  },
+
+  // Unsubscribe
+  unsubscribe: (channel) => {
+    supabase.removeChannel(channel);
+  },
+};
+
+export default supabase;
