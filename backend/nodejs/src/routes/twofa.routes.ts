@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { requireAuth, requireSuperAdmin } from "../middleware/requireAuth";
 import { twoFALimiter } from "../middleware/rateLimit";
+import { set2FAVerified } from "../middleware/require2fa";
 import { supabase } from "../services/supabase";
 import { twoFAService } from "../services/twofa.service";
 
@@ -553,6 +554,9 @@ router.post(
 
       // Reset attempts
       await supabase.reset2FAAttempts(adminProfile.id);
+
+      // Set verified 2FA flag in request (used by require2FA middleware)
+      set2FAVerified(req);
 
       // Log success
       await supabase.logAdminAction(
