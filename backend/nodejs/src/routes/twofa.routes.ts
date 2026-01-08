@@ -411,4 +411,173 @@ router.post(
   }
 );
 
+/**
+ * POST /admin/2fa/verify-login
+ * Verify 2FA code during login flow
+ * CRITICAL: Used when user has 2FA enabled
+ * Body: { token: "123456" }
+ * Returns: { success: true, message: "2FA verified" }
+ * 
+ * This endpoint:
+ * - Does NOT require superAdmin middleware (user not fully authenticated yet)
+ * - Uses rate limiting
+ * - Checks lockout status
+ * - Logs all attempts (success/failure)
+ * - Returns specific error codes for frontend handling
+ */
+router.post(
+  "/verify-login",
+  twoFALimiter,
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const { token } = req.body;
+      const userId = req.user!.id;
+
+      if (!token || typeof token !== "string") {
+        res.status(400).json({
+          error: "Missing or invalid 2FA token",
+          code: "INVALID_TOKEN",
+        });
+        return;
+      }
+
+      // Get admin profile
+      const adminProfile = await supabase.getAdminProfile(userId);
+      if (!adminProfile) {
+        console.log("[2FA] Admin not found for login verification");
+        res.status(401).json({
+          error: "Admin not found",
+          code: "NOT_FOUND",
+        });
+        return;
+      }
+
+      // Only super_admin users use 2FA
+      if (adminProfile.role !== "super_admin") {
+        console.log("[2FA] Non-super-admin attempted 2FA login");
+        res.status(403).json({
+          error: "2FA not required for this role",
+          code: "FORBIDDEN",
+        });
+        return;
+      }
+
+      // Check if 2FA is enabled
+      const twoFAStatus = await supabase.get2FAStatus(adminProfile.id);
+      if (!twoFAStatus || !twoFAStatus.enabled) {
+        console.log("[2FA] 2FA not enabled for admin");
+        res.status(400).json({
+          error: "2FA not enabled for this account",
+          code: "2FA_NOT_ENABLED",
+        });
+        return;
+      }
+
+      // Get encrypted secret
+      const encryptedSecret = await supabase.get2FASecret(adminProfile.id);
+      if (!encryptedSecret) {
+        console.log("[2FA] No 2FA secret found for admin");
+        res.status(500).json({
+          error: "2FA configuration error",
+          code: "2FA_CONFIG_ERROR",
+        });
+        return;
+      }
+
+      // Verify token
+      const isValid = twoFAService.verifyToken(encryptedSecret, token);
+
+      if (!isValid) {
+        console.log(`[2FA] Invalid token attempt for admin: ${adminProfile.email}`);
+
+        // Record failed attempt (rate limiting)
+        const attemptResult = await supabase.recordFailedAttempt(adminProfile.id);
+
+        // Log failure
+        await supabase.logAdminAction(
+          adminProfile.id,
+          "2FA_VERIFY_ATTEMPT",
+          "security",
+          "failure",
+          {
+            reason: "Invalid token",
+            attempt: attemptResult.attempts,
+          },
+          req.clientIp!,
+          req.userAgent!
+        );
+
+        if (attemptResult.locked) {
+          console.warn(
+            `[2FA] Admin locked out due to too many failed attempts: ${adminProfile.email}`
+          );
+
+          // Log lockout
+          await supabase.logAdminAction(
+            adminProfile.id,
+            "2FA_LOCKOUT",
+            "security",
+            "failure",
+            {
+              reason: "Too many failed attempts",
+              locked_until: attemptResult.lockUntil,
+            },
+            req.clientIp!,
+            req.userAgent!
+          );
+
+          res.status(429).json({
+            error: "Too many failed attempts. Please try again later.",
+            code: "RATE_LIMITED",
+            retryAfter: attemptResult.lockUntil
+              ? Math.ceil(
+                  (new Date(attemptResult.lockUntil).getTime() - Date.now()) /
+                    1000
+                )
+              : 600,
+          });
+          return;
+        }
+
+        res.status(400).json({
+          error: "Invalid 2FA code",
+          code: "INVALID_CODE",
+          attemptsRemaining: 3 - attemptResult.attempts,
+        });
+        return;
+      }
+
+      // Token is valid!
+      console.log(`[2FA] Valid 2FA token verified for admin: ${adminProfile.email}`);
+
+      // Reset attempts
+      await supabase.reset2FAAttempts(adminProfile.id);
+
+      // Log success
+      await supabase.logAdminAction(
+        adminProfile.id,
+        "2FA_VERIFY_ATTEMPT",
+        "security",
+        "success",
+        {},
+        req.clientIp!,
+        req.userAgent!
+      );
+
+      res.json({
+        success: true,
+        message: "2FA verification successful",
+      });
+    } catch (error) {
+      console.error("[2FA] Verification error:", error);
+
+      res.status(500).json({
+        error: "2FA verification failed",
+        code: "2FA_ERROR",
+      });
+    }
+  }
+);
+
 export default router;

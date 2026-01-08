@@ -282,6 +282,252 @@ class SupabaseService {
     }
   }
 
+  /**
+   * PHASE 3: 2FA METHODS
+   * All methods below support TOTP-based 2FA for super_admin users
+   */
+
+  /**
+   * Save encrypted 2FA secret for admin
+   * CRITICAL: Secret is encrypted before storage (future enhancement)
+   */
+  async save2FASecret(
+    adminId: string,
+    secret: string
+  ): Promise<boolean> {
+    try {
+      const { error } = await this.clientService
+        .from("admin_users")
+        .update({
+          twofa_secret: secret, // In production, encrypt this
+          twofa_enabled: false, // Not verified yet
+          twofa_verified_at: null,
+        })
+        .eq("id", adminId);
+
+      if (error) {
+        console.error("[2FA] Failed to save secret:", error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error("[2FA] Save secret error:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Get 2FA status for an admin
+   */
+  async get2FAStatus(
+    adminId: string
+  ): Promise<{ enabled: boolean; verified: boolean } | null> {
+    try {
+      const { data, error } = await this.clientService
+        .from("admin_users")
+        .select("twofa_enabled, twofa_verified_at")
+        .eq("id", adminId)
+        .single();
+
+      if (error || !data) {
+        return null;
+      }
+
+      return {
+        enabled: data.twofa_enabled || false,
+        verified: !!data.twofa_verified_at,
+      };
+    } catch (error) {
+      console.error("[2FA] Get status error:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Get encrypted 2FA secret for verification
+   * CRITICAL: Decrypt only server-side
+   */
+  async get2FASecret(adminId: string): Promise<string | null> {
+    try {
+      const { data, error } = await this.clientService
+        .from("admin_users")
+        .select("twofa_secret")
+        .eq("id", adminId)
+        .single();
+
+      if (error || !data) {
+        return null;
+      }
+
+      return data.twofa_secret;
+    } catch (error) {
+      console.error("[2FA] Get secret error:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Enable 2FA (mark as verified)
+   */
+  async enable2FA(adminId: string): Promise<boolean> {
+    try {
+      const { error } = await this.clientService
+        .from("admin_users")
+        .update({
+          twofa_enabled: true,
+          twofa_verified_at: new Date().toISOString(),
+        })
+        .eq("id", adminId);
+
+      if (error) {
+        console.error("[2FA] Failed to enable 2FA:", error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error("[2FA] Enable 2FA error:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Disable 2FA for admin
+   */
+  async disable2FA(adminId: string): Promise<boolean> {
+    try {
+      const { error } = await this.clientService
+        .from("admin_users")
+        .update({
+          twofa_enabled: false,
+          twofa_verified_at: null,
+          twofa_secret: null,
+          twofa_backup_codes: null,
+        })
+        .eq("id", adminId);
+
+      if (error) {
+        console.error("[2FA] Failed to disable 2FA:", error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error("[2FA] Disable 2FA error:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Rate limiting: Record failed attempt and check if locked
+   */
+  async recordFailedAttempt(
+    adminId: string
+  ): Promise<{
+    locked: boolean;
+    lockUntil?: Date;
+    attempts: number;
+  }> {
+    try {
+      const { data: existing } = await this.clientService
+        .from("twofa_attempts")
+        .select("*")
+        .eq("admin_id", adminId)
+        .single();
+
+      const now = new Date();
+      const twoFALockoutMinutes = 10;
+
+      if (existing) {
+        const lastAttempt = new Date(existing.last_attempt_at);
+        const timeSinceLastAttempt = now.getTime() - lastAttempt.getTime();
+
+        // Reset counter if more than 10 minutes have passed
+        if (timeSinceLastAttempt > twoFALockoutMinutes * 60 * 1000) {
+          // Window expired, reset counter
+          await this.clientService
+            .from("twofa_attempts")
+            .update({
+              attempt_count: 1,
+              last_attempt_at: now.toISOString(),
+              locked_until: null,
+            })
+            .eq("admin_id", adminId);
+
+          return { locked: false, attempts: 1 };
+        }
+
+        // Increment counter
+        const newCount = existing.attempt_count + 1;
+
+        if (newCount >= 3) {
+          // Lock admin for 10 minutes
+          const lockUntil = new Date(
+            now.getTime() + twoFALockoutMinutes * 60 * 1000
+          );
+
+          await this.clientService
+            .from("twofa_attempts")
+            .update({
+              attempt_count: newCount,
+              locked_until: lockUntil.toISOString(),
+              last_attempt_at: now.toISOString(),
+            })
+            .eq("admin_id", adminId);
+
+          return { locked: true, lockUntil, attempts: newCount };
+        }
+
+        // Not locked yet
+        await this.clientService
+          .from("twofa_attempts")
+          .update({
+            attempt_count: newCount,
+            last_attempt_at: now.toISOString(),
+          })
+          .eq("admin_id", adminId);
+
+        return { locked: false, attempts: newCount };
+      } else {
+        // First attempt for this admin
+        await this.clientService
+          .from("twofa_attempts")
+          .insert({
+            admin_id: adminId,
+            attempt_count: 1,
+            last_attempt_at: now.toISOString(),
+          });
+
+        return { locked: false, attempts: 1 };
+      }
+    } catch (error) {
+      console.error("[2FA] Record attempt error:", error);
+      return { locked: false, attempts: 0 };
+    }
+  }
+
+  /**
+   * Reset attempts after successful verification
+   */
+  async reset2FAAttempts(adminId: string): Promise<boolean> {
+    try {
+      await this.clientService
+        .from("twofa_attempts")
+        .update({
+          attempt_count: 0,
+          last_attempt_at: new Date().toISOString(),
+          locked_until: null,
+        })
+        .eq("admin_id", adminId);
+
+      return true;
+    } catch (error) {
+      console.error("[2FA] Reset attempts error:", error);
+      return false;
+    }
+  }
+
   // Public accessors for use in routes
   getAnonClient(): SupabaseClient {
     return this.clientAnon;
