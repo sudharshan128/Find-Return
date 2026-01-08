@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { requireAuth, requireAdmin, requireSuperAdmin } from "../middleware/requireAuth";
+import { require2FA } from "../middleware/require2fa";
 import { adminLimiter } from "../middleware/rateLimit";
 import { supabase } from "../services/supabase";
 
@@ -176,6 +177,7 @@ router.get(
   adminLimiter,
   requireAuth,
   requireSuperAdmin,
+  require2FA,
   async (req: Request, res: Response) => {
     try {
       const adminProfile = req.adminProfile!;
