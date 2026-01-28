@@ -6,7 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAdminAuth } from '../contexts/AdminAuthContext';
-import { adminItems } from '../lib/adminSupabase';
+import { adminAPIClient } from '../lib/apiClient';
 import {
   Search,
   Package,
@@ -23,15 +23,17 @@ import {
   Image,
   AlertTriangle,
   CheckCircle,
+  Gift,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const AdminItemsPage = () => {
-  const { adminProfile, isSuperAdmin, isModerator } = useAdminAuth();
+  const { adminProfile, isSuperAdmin, isModerator, loading: authLoading } = useAdminAuth();
   const [searchParams] = useSearchParams();
   
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0 });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
@@ -46,9 +48,19 @@ const AdminItemsPage = () => {
   const [actionLoading, setActionLoading] = useState(false);
 
   const fetchItems = useCallback(async () => {
+    // Guard: only fetch if auth is ready
+    if (authLoading || !adminProfile?.id) {
+      console.log('[ADMIN ITEMS] Auth not ready, skipping fetch');
+      setLoading(false);
+      return;
+    }
+
     try {
+      console.log('[ADMIN ITEMS] Fetching items...');
       setLoading(true);
-      const result = await adminItems.getAll({
+      setError(null);
+
+      const result = await adminAPIClient.items.getAll({
         page: pagination.page,
         limit: pagination.limit,
         search: search || undefined,
@@ -56,19 +68,25 @@ const AdminItemsPage = () => {
         flagged: flaggedOnly || undefined,
         hidden: hiddenOnly || undefined,
       });
-      setItems(result.data);
+      setItems(result.data || []);
       setPagination(prev => ({ ...prev, total: result.total }));
+      console.log('[ADMIN ITEMS] Items fetched:', (result.data || []).length);
     } catch (error) {
-      console.error('Error fetching items:', error);
+      console.error('[ADMIN ITEMS] Error fetching items:', error);
+      setError(error.message || 'Failed to load items');
       toast.error('Failed to load items');
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.limit, search, statusFilter, flaggedOnly, hiddenOnly]);
+  }, [pagination.page, pagination.limit, search, statusFilter, flaggedOnly, hiddenOnly, authLoading, adminProfile?.id]);
 
   useEffect(() => {
-    fetchItems();
-  }, [fetchItems]);
+    if (!authLoading && adminProfile?.id) {
+      fetchItems();
+    } else if (authLoading) {
+      console.log('[ADMIN ITEMS] Waiting for auth to load...');
+    }
+  }, [fetchItems, authLoading, adminProfile?.id]);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -78,7 +96,7 @@ const AdminItemsPage = () => {
 
   const openDetailModal = async (item) => {
     try {
-      const fullItem = await adminItems.getById(item.id);
+      const fullItem = await adminAPIClient.items.get(item.id);
       setSelectedItem(fullItem);
       setShowDetailModal(true);
     } catch (error) {
@@ -98,28 +116,32 @@ const AdminItemsPage = () => {
 
       switch (actionType) {
         case 'hide':
-          await adminItems.hideItem(selectedItem.id, reason);
+          await adminAPIClient.items.hide(selectedItem.id, reason);
           toast.success('Item hidden successfully');
           break;
         case 'unhide':
-          await adminItems.unhideItem(selectedItem.id, adminProfile.id, reason);
+          await adminAPIClient.items.unhide(selectedItem.id, reason);
           toast.success('Item unhidden successfully');
           break;
         case 'soft_delete':
-          await adminItems.softDeleteItem(selectedItem.id, adminProfile.id, reason);
+          await adminAPIClient.items.softDelete(selectedItem.id, reason);
           toast.success('Item soft deleted successfully');
           break;
         case 'restore':
-          await adminItems.restoreItem(selectedItem.id, adminProfile.id, reason);
+          await adminAPIClient.items.restore(selectedItem.id, reason);
           toast.success('Item restored successfully');
           break;
         case 'hard_delete':
-          await adminItems.hardDeleteItem(selectedItem.id, adminProfile.id, reason);
+          await adminAPIClient.items.hardDelete(selectedItem.id, reason);
           toast.success('Item permanently deleted');
           break;
         case 'clear_flag':
-          await adminItems.clearFlag(selectedItem.id, adminProfile.id, reason);
+          await adminAPIClient.items.clearFlag(selectedItem.id, reason);
           toast.success('Flag cleared successfully');
+          break;
+        case 'mark_returned':
+          await adminAPIClient.items.markReturned(selectedItem.id, reason);
+          toast.success('Item marked as returned successfully');
           break;
         default:
           break;
@@ -355,6 +377,17 @@ const AdminItemsPage = () => {
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </button>
+                                
+                                {/* Mark as Returned - only for claimed items */}
+                                {item.status === 'claimed' && (
+                                  <button
+                                    onClick={() => openActionModal(item, 'mark_returned')}
+                                    className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg"
+                                    title="Mark as Returned"
+                                  >
+                                    <Gift className="h-4 w-4" />
+                                  </button>
+                                )}
                               </>
                             )}
                             
@@ -444,7 +477,7 @@ const ItemDetailModal = ({ item, onClose }) => {
   useEffect(() => {
     const fetchHistory = async () => {
       try {
-        const history = await adminItems.getModerationHistory(item.id);
+        const history = await adminAPIClient.items.getModerationHistory(item.id);
         setModerationHistory(history);
       } catch (error) {
         console.error('Error fetching moderation history:', error);
@@ -663,6 +696,12 @@ const ActionConfirmModal = ({ item, actionType, loading, onConfirm, onClose }) =
       description: 'This will remove the flag from the item after review.',
       confirmText: 'Clear Flag',
       confirmClass: 'bg-green-600 hover:bg-green-700',
+    },
+    mark_returned: {
+      title: '✅ Mark Item as Returned',
+      description: 'This confirms the item has been successfully returned to its rightful owner. Trust scores will be updated for both finder and claimant.',
+      confirmText: 'Confirm Return',
+      confirmClass: 'bg-purple-600 hover:bg-purple-700',
     },
   };
 

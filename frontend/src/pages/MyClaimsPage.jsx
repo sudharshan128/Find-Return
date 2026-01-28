@@ -19,10 +19,14 @@ const MyClaimsPage = () => {
 
   useEffect(() => {
     // Wait for auth to initialize
-    if (initializing) return;
+    if (initializing) {
+      console.log('[MY CLAIMS] Waiting for auth to initialize...');
+      return;
+    }
     
     // Guard: no user means not logged in
     if (!user?.id) {
+      console.log('[MY CLAIMS] No user, setting loading to false');
       setLoading(false);
       return;
     }
@@ -31,11 +35,14 @@ const MyClaimsPage = () => {
 
     const fetchClaims = async () => {
       try {
+        console.log('[MY CLAIMS] Fetching claims for user:', user.id);
         setLoading(true);
         setError(null);
         
         // Timeout safety: 15 seconds
+        const controller = new AbortController();
         const timeoutId = setTimeout(() => {
+          console.warn('[MY CLAIMS] Fetch timeout');
           controller.abort();
         }, 15000);
 
@@ -44,10 +51,12 @@ const MyClaimsPage = () => {
         clearTimeout(timeoutId);
         
         if (isMounted) {
+          console.log('[MY CLAIMS] Claims fetched:', data?.length || 0);
           setClaims(data || []);
+          setError(null);
         }
       } catch (error) {
-        console.error('Error fetching claims:', error);
+        console.error('[MY CLAIMS] Error fetching claims:', error);
         if (isMounted) {
           setError(error.message || 'Failed to load claims');
         }

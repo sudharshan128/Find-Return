@@ -55,17 +55,10 @@ const ReportFoundPage = () => {
         setInitialLoading(true);
         setDataError(null);
         
-        // Timeout safety
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Request timeout')), 15000)
-        );
-        
-        const dataPromise = Promise.all([
+        const [cats, areasData] = await Promise.all([
           db.categories.getAll(),
           db.areas.getAll(),
         ]);
-
-        const [cats, areasData] = await Promise.race([dataPromise, timeoutPromise]);
         
         if (isMounted) {
           setCategories(cats || []);
@@ -191,8 +184,9 @@ const ReportFoundPage = () => {
       for (let i = 0; i < images.length; i++) {
         const { path, publicUrl } = await storage.uploadItemImage(images[i].file, user.id);
         uploadedImages.push({
+          storage_bucket: 'item-images',
           storage_path: path,
-          public_url: publicUrl,
+          image_url: publicUrl,
           is_primary: i === 0,
         });
       }
@@ -205,21 +199,27 @@ const ReportFoundPage = () => {
         category_id: formData.categoryId,
         area_id: formData.areaId,
         location_details: formData.locationDetails,
-        found_date: formData.foundDate,
-        verification_questions: [
-          formData.verificationQuestion1,
-          formData.verificationQuestion2,
-          formData.verificationQuestion3,
-        ].filter(Boolean),
+        date_found: formData.foundDate,
+        security_question: formData.verificationQuestion1 || 'What color was the item?',
         status: 'active',
       });
 
+      console.log('[ReportFoundPage] Item created:', item.id);
+
       // Create image records
-      for (const img of uploadedImages) {
-        await db.itemImages.create({
-          item_id: item.id,
-          ...img,
-        });
+      for (let i = 0; i < uploadedImages.length; i++) {
+        const img = uploadedImages[i];
+        console.log('[ReportFoundPage] Creating image record:', i + 1, 'of', uploadedImages.length, img);
+        try {
+          const createdImage = await db.itemImages.create({
+            item_id: item.id,
+            ...img,
+          });
+          console.log('[ReportFoundPage] Image record created:', createdImage.id);
+        } catch (imgError) {
+          console.error('[ReportFoundPage] Error creating image record:', imgError);
+          throw imgError;
+        }
       }
 
       toast.success('Item reported successfully!');

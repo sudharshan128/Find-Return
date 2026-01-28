@@ -70,30 +70,45 @@ const ClaimForm = ({ item, onClose, onSuccess }) => {
         try {
           const { path, publicUrl } = await storage.uploadClaimImage(file, user.id);
           uploadedImages.push(publicUrl);
+          console.log('[ClaimForm] Image uploaded successfully:', path);
         } catch (uploadError) {
-          console.error('Image upload error:', uploadError);
+          console.error('[ClaimForm] Image upload error:', uploadError);
           // Continue without images if upload fails
         }
       }
 
-      // Create claim with answers stored in the claim itself
+      console.log('[ClaimForm] Creating claim with data:', {
+        item_id: item.id,
+        claimant_id: user.id,
+        status: 'pending',
+        description: formData.uniqueMarks,
+        contact_info: user.email || 'Not provided',
+        security_answer_encrypted: 'encrypted_via_backend', // Will be encrypted by backend
+        proof_description: formData.lossDetails,
+        proof_images: uploadedImages,
+      });
+
+      // Create claim with correct column names
       const claim = await db.claims.create({
         item_id: item.id,
         claimant_id: user.id,
         status: 'pending',
-        answers: {
-          unique_marks: formData.uniqueMarks,
-          contents_description: formData.contents,
-          loss_circumstances: formData.lossDetails,
-          additional_info: formData.additionalInfo,
-          proof_images: uploadedImages,
-        },
+        description: formData.uniqueMarks, // Unique marks
+        contact_info: user.email || 'Not provided', // User's email
+        security_answer_encrypted: 'pending_verification', // Placeholder - backend will handle encryption
+        proof_description: formData.lossDetails, // How they lost it + contents
+        proof_images: uploadedImages, // Array of image URLs
       });
 
+      console.log('[ClaimForm] Claim created successfully:', claim);
       onSuccess(claim);
     } catch (error) {
       console.error('Error submitting claim:', error);
-      toast.error('Failed to submit claim. Please try again.');
+      console.error('Error code:', error?.code);
+      console.error('Error message:', error?.message);
+      console.error('Error details:', error?.details);
+      console.error('Full error object:', JSON.stringify(error, null, 2));
+      toast.error(`Failed to submit claim: ${error?.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }

@@ -24,4 +24,5 @@ export { default as AdminAuditLogsPage } from './pages/AdminAuditLogsPage';
 export { default as AdminSettingsPage } from './pages/AdminSettingsPage';
 
 // API Layer
-export * from './lib/adminSupabase';
+// Note: Do not re-export the full adminSupabase surface here — it contains
+// privileged DB helpers. Import `adminAPIClient` or `adminAuth` explicitly where needed.

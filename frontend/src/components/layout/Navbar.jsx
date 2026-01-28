@@ -34,10 +34,15 @@ const Navbar = () => {
 
   const handleSignOut = async () => {
     try {
+      setIsProfileMenuOpen(false);
       await signOut();
-      navigate('/');
+      // Redirect after a small delay to let state update
+      setTimeout(() => navigate('/'), 100);
     } catch (error) {
-      console.error('Sign out error:', error);
+      console.error('[NAVBAR] Sign out error:', error);
+      // Even if there's an error, redirect to home
+      // The user's session should be cleared locally
+      setTimeout(() => navigate('/'), 100);
     }
   };
 

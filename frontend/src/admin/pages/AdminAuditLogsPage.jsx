@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAdminAuth } from '../contexts/AdminAuthContext';
-import { adminAuditLogs } from '../lib/adminSupabase';
+import { adminAPIClient } from '../lib/apiClient';
 import {
   Shield,
   Eye,
@@ -30,10 +30,11 @@ import {
 import toast from 'react-hot-toast';
 
 const AdminAuditLogsPage = () => {
-  const { isSuperAdmin } = useAdminAuth();
+  const { isSuperAdmin, loading: authLoading } = useAdminAuth();
   
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0 });
   const [search, setSearch] = useState('');
   const [actionFilter, setActionFilter] = useState('');
@@ -49,9 +50,18 @@ const AdminAuditLogsPage = () => {
   const [admins, setAdmins] = useState([]);
 
   const fetchLogs = useCallback(async () => {
+    if (authLoading) {
+      console.log('[AUDIT LOGS] Auth not ready, skipping fetch');
+      setLoading(false);
+      return;
+    }
+
     try {
+      console.log('[AUDIT LOGS] Fetching logs...');
       setLoading(true);
-      const result = await adminAuditLogs.getAll({
+      setError(null);
+
+      const result = await adminAPIClient.audit.getLogs({
         page: pagination.page,
         limit: pagination.limit,
         search: search || undefined,
@@ -60,29 +70,53 @@ const AdminAuditLogsPage = () => {
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
       });
-      setLogs(result.data);
+      setLogs(result.data || []);
       setPagination(prev => ({ ...prev, total: result.total }));
+      console.log('[AUDIT LOGS] Logs fetched:', (result.data || []).length);
     } catch (error) {
-      console.error('Error fetching audit logs:', error);
+      console.error('[AUDIT LOGS] Error fetching audit logs:', error);
+      setError(error.message || 'Failed to load audit logs');
       toast.error('Failed to load audit logs');
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.limit, search, actionFilter, adminFilter, dateFrom, dateTo]);
+  }, [pagination.page, pagination.limit, search, actionFilter, adminFilter, dateFrom, dateTo, authLoading]);
 
   const fetchAdmins = async () => {
     try {
-      const result = await adminAuditLogs.getAdmins();
-      setAdmins(result);
+      // getLoginHistory returns { logins: [], total, limit, offset }
+      // We need to extract unique admins from the logins array
+      const result = await adminAPIClient.audit.getLoginHistory();
+      const logins = result?.logins || [];
+      
+      // Extract unique admins from login history
+      const uniqueAdmins = [];
+      const seenIds = new Set();
+      
+      for (const login of logins) {
+        if (login.admin_id && !seenIds.has(login.admin_id)) {
+          seenIds.add(login.admin_id);
+          uniqueAdmins.push({
+            id: login.admin_id,
+            full_name: login.admin_email || login.email || `Admin ${login.admin_id.slice(0, 8)}`,
+            email: login.admin_email || login.email
+          });
+        }
+      }
+      
+      setAdmins(uniqueAdmins);
     } catch (error) {
-      console.error('Error fetching admins:', error);
+      console.error('[AUDIT LOGS] Error fetching admins:', error);
+      setAdmins([]); // Ensure admins is always an array
     }
   };
 
   useEffect(() => {
-    fetchLogs();
-    fetchAdmins();
-  }, [fetchLogs]);
+    if (!authLoading) {
+      fetchLogs();
+      fetchAdmins();
+    }
+  }, [fetchLogs, authLoading]);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -93,12 +127,20 @@ const AdminAuditLogsPage = () => {
   const handleExport = async () => {
     try {
       toast.loading('Generating export...');
-      const data = await adminAuditLogs.export({
+      const data = await adminAPIClient.audit.export({
         action: actionFilter || undefined,
         adminId: adminFilter || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
       });
+      
+      toast.dismiss();
+      
+      // Check if there are any logs to export
+      if (!data.logs || data.logs.length === 0) {
+        toast.error('No audit logs found for the selected filters');
+        return;
+      }
       
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -110,11 +152,10 @@ const AdminAuditLogsPage = () => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       
-      toast.dismiss();
-      toast.success('Export downloaded');
+      toast.success(`Exported ${data.totalRecords} audit log${data.totalRecords !== 1 ? 's' : ''}`);
     } catch (error) {
       toast.dismiss();
-      toast.error('Export failed');
+      toast.error('Export failed: ' + (error.message || 'Unknown error'));
     }
   };
 
@@ -270,8 +311,8 @@ const AdminAuditLogsPage = () => {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
               >
                 <option value="">All Admins</option>
-                {admins.map(admin => (
-                  <option key={admin.id} value={admin.id}>{admin.full_name}</option>
+                {Array.isArray(admins) && admins.map(admin => (
+                  <option key={admin.id} value={admin.id}>{admin.full_name || admin.email}</option>
                 ))}
               </select>
             </div>
@@ -356,10 +397,10 @@ const AdminAuditLogsPage = () => {
                           </div>
                           <div className="ml-3">
                             <div className="text-sm font-medium text-gray-900">
-                              {log.admin_users?.full_name || 'Unknown'}
+                              {log.admin_users?.full_name || log.admin_email || log.admin_id?.slice(0, 8) || 'Unknown'}
                             </div>
                             <div className="text-xs text-gray-500 capitalize">
-                              {log.admin_users?.role}
+                              {log.admin_users?.role || 'admin'}
                             </div>
                           </div>
                         </div>
@@ -477,8 +518,8 @@ const AuditLogDetailModal = ({ log, onClose }) => {
                 )}
               </div>
               <div>
-                <p className="text-sm font-medium text-gray-900">{log.admin_users?.full_name}</p>
-                <p className="text-xs text-gray-500 capitalize">{log.admin_users?.role} • {log.admin_users?.email}</p>
+                <p className="text-sm font-medium text-gray-900">{log.admin_users?.full_name || log.admin_email || log.admin_id?.slice(0, 8) || 'Unknown'}</p>
+                <p className="text-xs text-gray-500 capitalize">{log.admin_users?.role || 'admin'} • {log.admin_users?.email || log.admin_id}</p>
               </div>
             </div>
           </div>

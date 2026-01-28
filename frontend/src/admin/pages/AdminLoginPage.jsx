@@ -9,27 +9,31 @@ import { useAdminAuth } from '../contexts/AdminAuthContext';
 import { Shield, Lock, AlertCircle } from 'lucide-react';
 
 const AdminLoginPage = () => {
-  const { signInWithGoogle, isAuthenticated, loading, initializing } = useAdminAuth();
+  const { signInWithGoogle, isAuthenticated, loading, initializing, requires2FA } = useAdminAuth();
   const navigate = useNavigate();
   const [error, setError] = useState(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
 
-  console.log('[LOGIN PAGE]', { initializing, isAuthenticated, loading });
+  console.log('[LOGIN PAGE]', { initializing, isAuthenticated, loading, requires2FA });
 
   useEffect(() => {
-    if (!initializing && isAuthenticated) {
+    if (!initializing && isAuthenticated && !requires2FA) {
       console.log('[LOGIN PAGE] Already authenticated, redirecting to /admin');
       navigate('/admin');
     }
-  }, [isAuthenticated, initializing, navigate]);
+  }, [isAuthenticated, initializing, navigate, requires2FA]);
 
   const handleGoogleSignIn = async () => {
     try {
       console.log('[LOGIN PAGE] Starting Google sign in...');
       setError(null);
+      setIsSigningIn(true);
       await signInWithGoogle();
+      // Redirect will happen in auth context
     } catch (err) {
       console.error('[LOGIN PAGE] Sign in error:', err);
-      setError('Failed to sign in. Please try again.');
+      setError(err.message || 'Failed to sign in. Please try again.');
+      setIsSigningIn(false);
     }
   };
 
@@ -78,10 +82,10 @@ const AdminLoginPage = () => {
 
           <button
             onClick={handleGoogleSignIn}
-            disabled={loading}
+            disabled={loading || isSigningIn}
             className="w-full flex items-center justify-center px-6 py-3 bg-white text-gray-900 rounded-lg font-medium hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? (
+            {loading || isSigningIn ? (
               <>
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-900 mr-3"></div>
                 Signing in...

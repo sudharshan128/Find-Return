@@ -39,9 +39,13 @@ const SettingsPage = () => {
   const handleSignOut = async () => {
     try {
       await signOut();
-      navigate('/');
+      // Redirect after a small delay to let state update
+      setTimeout(() => navigate('/'), 100);
     } catch (error) {
-      toast.error('Failed to sign out');
+      console.error('[SETTINGS] Sign out error:', error);
+      // Even if there's an error, redirect to home
+      // The user's session should be cleared locally
+      setTimeout(() => navigate('/'), 100);
     }
   };
 

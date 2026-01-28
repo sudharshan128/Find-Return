@@ -1,12 +1,12 @@
 /**
- * Chat Page
- * Real-time chat with finder/claimant
+ * Chat Page - Production Ready with Security & Real-time
+ * Real-time chat between finder and approved claimant
  */
 
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { db, realtime } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { 
   ChevronLeft, 
@@ -15,10 +15,11 @@ import {
   CheckCheck,
   Info,
   Gift,
-  Loader2
+  Loader2,
+  Lock,
+  AlertTriangle
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
-import { ConfirmDialog, SafetyBanner, ReportAbuseModal } from '../components/common';
 
 const ChatPage = () => {
   const { id } = useParams();
@@ -29,6 +30,7 @@ const ChatPage = () => {
   const [chat, setChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [sending, setSending] = useState(false);
   const [newMessage, setNewMessage] = useState('');
   const [showReturnConfirm, setShowReturnConfirm] = useState(false);
@@ -37,36 +39,59 @@ const ChatPage = () => {
 
   // Fetch chat and messages
   useEffect(() => {
+    let isMounted = true;
+
     const fetchData = async () => {
       try {
+        console.log('[CHAT] Fetching chat data:', id);
+        setLoading(true);
+        setError(null);
+
         // Get chat details
         const chatData = await db.chats.get(id);
         
+        if (!isMounted) return;
+
         // Verify access
         if (chatData.finder_id !== user.id && chatData.claimant_id !== user.id) {
+          console.log('[CHAT] Unauthorized access attempt');
           toast.error('You do not have access to this chat');
           navigate('/chats');
           return;
         }
         
+        console.log('[CHAT] Chat authorized, loading messages...');
         setChat(chatData);
 
         // Get messages
         const messagesData = await db.messages.getForChat(id);
-        setMessages(messagesData || []);
+        
+        if (isMounted) {
+          setMessages(messagesData || []);
+          console.log('[CHAT] Messages loaded:', (messagesData || []).length);
 
-        // Mark as read
-        await db.messages.markRead(id, user.id);
-      } catch (error) {
-        console.error('Error fetching chat:', error);
-        toast.error('Failed to load chat');
-        navigate('/chats');
+          // Mark as read
+          await db.messages.markRead(id, user.id);
+        }
+      } catch (err) {
+        console.error('[CHAT] Error fetching chat:', err);
+        if (isMounted) {
+          setError(err.message || 'Failed to load chat');
+          toast.error('Failed to load chat');
+          setTimeout(() => navigate('/chats'), 2000);
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 
     fetchData();
+
+    return () => {
+      isMounted = false;
+    };
   }, [id, user.id, navigate]);
 
   // Subscribe to new messages

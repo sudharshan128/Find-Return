@@ -356,6 +356,10 @@ CREATE TABLE IF NOT EXISTS public.user_storage_usage (
 -- Enable RLS
 ALTER TABLE public.user_storage_usage ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies
+DROP POLICY IF EXISTS "storage_usage_select_own" ON public.user_storage_usage;
+DROP POLICY IF EXISTS "storage_usage_all" ON public.user_storage_usage;
+
 -- Users can view their own usage
 CREATE POLICY "storage_usage_select_own"
 ON public.user_storage_usage FOR SELECT

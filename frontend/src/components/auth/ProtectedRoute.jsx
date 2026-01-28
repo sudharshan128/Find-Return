@@ -7,7 +7,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
 export const ProtectedRoute = ({ children, requireAdmin = false }) => {
-  const { isAuthenticated, isAdmin, isBanned, loading, initializing } = useAuth();
+  const { isAuthenticated, isAdmin, isBanned, initializing } = useAuth();
   const location = useLocation();
 
   // Show loading while checking auth

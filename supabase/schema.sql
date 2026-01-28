@@ -660,8 +660,14 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION increment_item_claims()
 RETURNS TRIGGER AS $$
 BEGIN
-    UPDATE public.items SET total_claims = total_claims + 1 WHERE id = NEW.item_id;
-    UPDATE public.user_profiles SET claims_made_count = claims_made_count + 1 WHERE user_id = NEW.claimant_id;
+    UPDATE public.items 
+    SET total_claims = total_claims + 1 
+    WHERE public.items.id = NEW.item_id;
+    
+    UPDATE public.user_profiles 
+    SET claims_made_count = claims_made_count + 1 
+    WHERE public.user_profiles.user_id = NEW.claimant_id;
+    
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -675,7 +681,9 @@ DECLARE
 BEGIN
     IF NEW.status = 'approved' AND OLD.status = 'pending' THEN
         -- Get finder ID
-        SELECT finder_id INTO v_finder_id FROM public.items WHERE id = NEW.item_id;
+        SELECT public.items.finder_id INTO v_finder_id 
+        FROM public.items 
+        WHERE public.items.id = NEW.item_id;
         
         -- Create chat room
         INSERT INTO public.chats (item_id, claim_id, finder_id, claimant_id)
@@ -687,18 +695,22 @@ BEGIN
         NEW.approved_at = NOW();
         
         -- Update item status
-        UPDATE public.items SET status = 'claimed', approved_claim_id = NEW.id WHERE id = NEW.item_id;
+        UPDATE public.items 
+        SET status = 'claimed', approved_claim_id = NEW.id 
+        WHERE public.items.id = NEW.item_id;
         
         -- Reject other pending claims
         UPDATE public.claims 
         SET status = 'rejected', rejection_reason = 'Another claim was approved', rejected_at = NOW()
-        WHERE item_id = NEW.item_id AND id != NEW.id AND status = 'pending';
+        WHERE public.claims.item_id = NEW.item_id 
+        AND public.claims.id != NEW.id 
+        AND public.claims.status = 'pending';
         
         -- Update claimant stats
         UPDATE public.user_profiles 
         SET successful_claims_count = successful_claims_count + 1,
             trust_score = LEAST(100, trust_score + 5) 
-        WHERE user_id = NEW.claimant_id;
+        WHERE public.user_profiles.user_id = NEW.claimant_id;
     END IF;
     
     IF NEW.status = 'rejected' AND OLD.status = 'pending' THEN
@@ -720,12 +732,13 @@ BEGIN
         UPDATE public.user_profiles 
         SET items_returned_count = items_returned_count + 1,
             trust_score = LEAST(100, trust_score + 10) 
-        WHERE user_id = NEW.finder_id;
+        WHERE public.user_profiles.user_id = NEW.finder_id;
         
         -- Close chat
         UPDATE public.chats 
         SET is_closed = TRUE, closed_at = NOW(), close_reason = 'Item returned'
-        WHERE item_id = NEW.id AND is_closed = FALSE;
+        WHERE public.chats.item_id = NEW.id 
+        AND public.chats.is_closed = FALSE;
     END IF;
     RETURN NEW;
 END;

@@ -37,13 +37,27 @@ const FIXED_CATEGORIES = [
   { slug: 'other', name: 'Other', icon: '📦' },
 ];
 
+// Fixed areas as fallback
+const FIXED_AREAS = [
+  { id: '1', name: 'BTM Layout', zone: 'South' },
+  { id: '2', name: 'Koramangala', zone: 'South' },
+  { id: '3', name: 'Indiranagar', zone: 'East' },
+  { id: '4', name: 'Whitefield', zone: 'East' },
+  { id: '5', name: 'Silk Board', zone: 'South' },
+  { id: '6', name: 'Richmond Road', zone: 'West' },
+  { id: '7', name: 'Ulsoor', zone: 'Central' },
+  { id: '8', name: 'Forum Mall', zone: 'South' },
+  { id: '9', name: 'MG Road', zone: 'Central' },
+  { id: '10', name: 'Brigade Road', zone: 'Central' },
+];
+
 // Max file size: 5MB
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_FILE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 
 const UploadItemPage = () => {
   const navigate = useNavigate();
-  const { user, profile, isAuthenticated } = useAuth();
+  const { user, profile, isAuthenticated, authLoading } = useAuth();
   
   // Form state
   const [step, setStep] = useState(1);
@@ -74,25 +88,50 @@ const UploadItemPage = () => {
 
   // Redirect if not authenticated
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated && !authLoading) {
+      console.log('[UPLOAD] Not authenticated, redirecting to login');
       toast.error('Please sign in to upload a found item');
       navigate('/login', { state: { from: '/upload-item' } });
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, authLoading, navigate]);
 
-  // Load categories and areas from database
+  // Load categories and areas from database - wait for auth
   useEffect(() => {
+    // Skip if auth is still initializing
+    if (authLoading) {
+      console.log('[UPLOAD] Waiting for auth to initialize...');
+      return;
+    }
+
     const loadData = async () => {
       setLoading(true);
       try {
-        const [catsData, areasData] = await Promise.all([
-          db.categories.getAll(),
-          db.areas.getAll(),
-        ]);
+        console.log('[UPLOAD] Loading categories and areas...');
+        
+        // Load categories
+        let catsData = [];
+        try {
+          console.log('[UPLOAD] Fetching categories...');
+          catsData = await db.categories.getAll();
+          console.log('[UPLOAD] Categories response:', catsData);
+        } catch (catError) {
+          console.error('[UPLOAD] Error loading categories:', catError);
+        }
+        
+        // Load areas
+        let areasData = [];
+        try {
+          console.log('[UPLOAD] Fetching areas...');
+          areasData = await db.areas.getAll();
+          console.log('[UPLOAD] Areas response:', areasData);
+        } catch (areaError) {
+          console.error('[UPLOAD] Error loading areas:', areaError);
+        }
         
         // Map database categories to fixed categories or use fixed if no match
         if (catsData && catsData.length > 0) {
           setCategories(catsData);
+          console.log('[UPLOAD] Categories loaded from DB:', catsData.length);
         } else {
           // Use fixed categories if none in database
           setCategories(FIXED_CATEGORIES.map((c, i) => ({
@@ -100,24 +139,38 @@ const UploadItemPage = () => {
             ...c,
             display_order: i,
           })));
+          console.log('[UPLOAD] Using fixed categories');
         }
         
-        setAreas(areasData || []);
+        // Always set areas, even if empty (will fallback in render if needed)
+        if (areasData && areasData.length > 0) {
+          setAreas(areasData);
+          console.log('[UPLOAD] Areas loaded from DB:', areasData.length);
+        } else {
+          // Use fixed areas if none in database
+          setAreas(FIXED_AREAS.map((a, i) => ({
+            ...a,
+            is_active: true,
+            display_order: i,
+          })));
+          console.log('[UPLOAD] Using fixed areas');
+        }
+        console.log('[UPLOAD] Total areas available:', (areasData?.length || FIXED_AREAS.length));
       } catch (error) {
-        console.error('Error loading data:', error);
-        // Fall back to fixed categories
+        console.error('[UPLOAD] Unexpected error loading data:', error);
+        // Always fall back to fixed categories on error
         setCategories(FIXED_CATEGORIES.map((c, i) => ({
           id: c.slug,
           ...c,
           display_order: i,
         })));
-        toast.error('Could not load some form data. Using defaults.');
+        setAreas([]);
       } finally {
         setLoading(false);
       }
     };
     loadData();
-  }, []);
+  }, [authLoading]);
 
   // Group areas by zone for better UX
   const areasByZone = areas.reduce((acc, area) => {

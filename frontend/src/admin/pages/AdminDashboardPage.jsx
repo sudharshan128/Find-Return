@@ -6,7 +6,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAdminAuth } from '../contexts/AdminAuthContext';
-import { adminDashboard } from '../lib/adminSupabase';
+import { adminAPIClient } from '../lib/apiClient';
 import {
   Users,
   Package,
@@ -42,23 +42,40 @@ const AdminDashboardPage = () => {
       
       setError(null);
 
+      console.log('[ADMIN DASHBOARD] Fetching data via backend...');
+      // ✓ CRITICAL FIX: Call backend API instead of Supabase directly
       const [summary, daily, areas, categories] = await Promise.all([
-        adminDashboard.getSummary(),
-        adminDashboard.getDailyStats(14),
-        adminDashboard.getAreaStats(),
-        adminDashboard.getCategoryStats(),
+        adminAPIClient.analytics.summary(),
+        adminAPIClient.analytics.trends(14),
+        adminAPIClient.analytics.areas(),
+        adminAPIClient.analytics.categories(),
       ]);
 
-      setStats(summary);
-      setDailyStats(daily);
-      setAreaStats(areas.slice(0, 10));
-      setCategoryStats(categories);
+      console.log('[ADMIN DASHBOARD] Data fetched successfully');
+      setStats(summary || {});
+      setDailyStats(daily || []);
+      setAreaStats((areas || []).slice(0, 10));
+      setCategoryStats(categories || []);
+      setError(null);
 
       if (isRefresh) toast.success('Dashboard refreshed');
     } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-      setError('Failed to load dashboard data');
-      toast.error('Failed to load dashboard data');
+      console.error('[ADMIN DASHBOARD] Error fetching data:', error);
+      // FIX: Set safe empty states when data fetch fails
+      // Show "No data" instead of white screen
+      setStats({
+        totalItems: 0,
+        totalClaims: 0,
+        totalReports: 0,
+        totalUsers: 0,
+        activeItems: 0,
+        approvedClaims: 0,
+      });
+      setDailyStats([]);
+      setAreaStats([]);
+      setCategoryStats([]);
+      setError(error?.message || 'Failed to load dashboard data');
+      // Don't show toast here - data loads but shows empty state
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -67,20 +84,33 @@ const AdminDashboardPage = () => {
 
   // Only fetch when auth is complete AND adminProfile is set
   useEffect(() => {
-    if (!authLoading && isAuthenticated && adminProfile) {
-      console.log('[DASHBOARD] Auth ready, fetching data...');
-      fetchData();
-    } else if (!authLoading && !isAuthenticated) {
-      console.log('[DASHBOARD] Not authenticated');
-      setLoading(false);
+    // CRITICAL: Wait for auth to be fully initialized
+    if (authLoading) {
+      console.log('[ADMIN DASHBOARD] Waiting for auth to initialize...');
+      return;
     }
-  }, [authLoading, isAuthenticated, adminProfile]);
+
+    if (!isAuthenticated) {
+      console.log('[ADMIN DASHBOARD] Not authenticated');
+      setLoading(false);
+      return;
+    }
+
+    if (!adminProfile?.id) {
+      console.log('[ADMIN DASHBOARD] Admin profile not loaded yet');
+      setLoading(true);
+      return;
+    }
+
+    console.log('[ADMIN DASHBOARD] Auth ready, fetching data...');
+    fetchData();
+  }, [authLoading, isAuthenticated, adminProfile?.id]);
 
   // Safety fallback: if auth is not loading but data is still loading after 5 seconds
   useEffect(() => {
     if (!authLoading && loading) {
       const timeout = setTimeout(() => {
-        console.warn('[DASHBOARD] Loading timeout - forcing completion');
+        console.warn('[ADMIN DASHBOARD] Loading timeout - forcing completion');
         setLoading(false);
       }, 5000);
       return () => clearTimeout(timeout);
@@ -237,15 +267,6 @@ const AdminDashboardPage = () => {
           link="/admin/items"
         />
         <StatCard
-          title="Pending Claims"
-          value={stats?.claims?.pending}
-          icon={FileText}
-          color="bg-yellow-500"
-          subValue={stats?.claims?.approved_today}
-          subLabel="Approved today"
-          link="/admin/claims"
-        />
-        <StatCard
           title="Active Chats"
           value={stats?.chats?.active}
           icon={MessageSquare}
@@ -253,6 +274,44 @@ const AdminDashboardPage = () => {
           subValue={stats?.chats?.frozen}
           subLabel="Frozen"
           link="/admin/chats"
+        />
+        <StatCard
+          title="Total Claims"
+          value={stats?.claims?.total}
+          icon={FileText}
+          color="bg-gray-500"
+          subValue={`${stats?.claims?.pending || 0} pending`}
+          subLabel={`${stats?.claims?.approved || 0} approved, ${stats?.claims?.rejected || 0} rejected`}
+          link="/admin/claims"
+        />
+      </div>
+
+      {/* Claims breakdown */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <StatCard
+          title="Pending Claims"
+          value={stats?.claims?.pending}
+          icon={Clock}
+          color="bg-yellow-500"
+          subValue={stats?.claims?.total}
+          subLabel="Total claims"
+          link="/admin/claims?status=pending"
+        />
+        <StatCard
+          title="Approved Claims"
+          value={stats?.claims?.approved}
+          icon={CheckCircle}
+          color="bg-green-500"
+          subValue={stats?.claims?.approved_today}
+          subLabel="Approved today"
+          link="/admin/claims?status=approved"
+        />
+        <StatCard
+          title="Rejected Claims"
+          value={stats?.claims?.rejected}
+          icon={XCircle}
+          color="bg-red-500"
+          link="/admin/claims?status=rejected"
         />
       </div>
 

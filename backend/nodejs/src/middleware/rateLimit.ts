@@ -26,13 +26,38 @@ export const generalLimiter = rateLimit({
 
 /**
  * Stricter rate limit for admin operations
+ * Increased for development - React dev mode causes many rapid calls
  */
 export const adminLimiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "900000"), // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "50") / 2, // Half of general limit
+  windowMs: 60 * 1000, // 1 minute window (was 15 minutes)
+  max: 200, // 200 requests per minute (was 25 per 15 min)
   message: "Too many admin requests, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req: Request) => {
+    return getClientIp(req);
+  },
+});
+
+/**
+ * Very lenient rate limit for authenticated admin verification
+ * This is called multiple times during auth initialization
+ * Authenticated users are already protected from abuse
+ */
+export const adminVerifyLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 1000, // Allow 1000 requests per minute (React dev mode causes excessive rapid calls)
+  message: "Too many verification requests, please try again later.",
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req: Request) => {
+    // Skip rate limiting entirely in development
+    if (process.env.NODE_ENV === 'development') {
+      return true;
+    }
+    // Don't rate limit if no auth header (will fail auth check anyway)
+    return !req.headers.authorization;
+  },
   keyGenerator: (req: Request) => {
     return getClientIp(req);
   },

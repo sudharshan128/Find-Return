@@ -14,13 +14,18 @@ const ChatsPage = () => {
   const { user, initializing } = useAuth();
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     // Wait for auth to initialize
-    if (initializing) return;
+    if (initializing) {
+      console.log('[CHATS] Waiting for auth to initialize...');
+      return;
+    }
     
     // Guard: no user
     if (!user?.id) {
+      console.log('[CHATS] No user, setting loading to false');
       setLoading(false);
       return;
     }
@@ -29,12 +34,20 @@ const ChatsPage = () => {
 
     const fetchChats = async () => {
       try {
+        console.log('[CHATS] Fetching chats for user:', user.id);
+        setLoading(true);
+        setError(null);
+
         const data = await db.chats.getForUser(user.id);
         if (!cancelled) {
+          console.log('[CHATS] Chats fetched:', (data || []).length);
           setChats(data || []);
         }
       } catch (error) {
-        console.error('Error fetching chats:', error);
+        console.error('[CHATS] Error fetching chats:', error);
+        if (!cancelled) {
+          setError(error.message || 'Failed to load chats');
+        }
       } finally {
         if (!cancelled) {
           setLoading(false);

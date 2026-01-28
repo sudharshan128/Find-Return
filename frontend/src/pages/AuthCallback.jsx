@@ -11,7 +11,7 @@ import { CheckCircle, XCircle, Loader2, MapPin } from 'lucide-react';
 const AuthCallback = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, initializing } = useAuth();
   const [status, setStatus] = useState('processing'); // processing, success, error
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -28,7 +28,7 @@ const AuthCallback = () => {
 
     // Wait for auth state to settle
     const checkAuth = () => {
-      if (!loading) {
+      if (!initializing) {
         if (isAuthenticated) {
           setStatus('success');
           // Redirect after showing success
@@ -48,7 +48,7 @@ const AuthCallback = () => {
     };
 
     checkAuth();
-  }, [loading, isAuthenticated, navigate, searchParams]);
+  }, [initializing, isAuthenticated, navigate, searchParams]);
 
   // Auto-redirect on timeout for success
   useEffect(() => {

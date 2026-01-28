@@ -6,7 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAdminAuth } from '../contexts/AdminAuthContext';
-import { adminReports } from '../lib/adminSupabase';
+import { adminAPIClient } from '../lib/apiClient';
 import {
   AlertTriangle,
   Eye,
@@ -27,11 +27,12 @@ import {
 import toast from 'react-hot-toast';
 
 const AdminReportsPage = () => {
-  const { adminProfile, isModerator } = useAdminAuth();
+  const { adminProfile, isModerator, loading: authLoading } = useAdminAuth();
   const [searchParams] = useSearchParams();
   
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0 });
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
   const [typeFilter, setTypeFilter] = useState('');
@@ -44,31 +45,47 @@ const AdminReportsPage = () => {
   const [actionLoading, setActionLoading] = useState(false);
 
   const fetchReports = useCallback(async () => {
+    // Guard: only fetch if auth is ready
+    if (authLoading || !adminProfile?.id) {
+      console.log('[ADMIN REPORTS] Auth not ready, skipping fetch');
+      setLoading(false);
+      return;
+    }
+
     try {
+      console.log('[ADMIN REPORTS] Fetching reports...');
       setLoading(true);
-      const result = await adminReports.getAll({
+      setError(null);
+
+      const result = await adminAPIClient.reports.getAll({
         page: pagination.page,
         limit: pagination.limit,
         status: statusFilter || undefined,
         type: typeFilter || undefined,
       });
-      setReports(result.data);
+      setReports(result.data || []);
       setPagination(prev => ({ ...prev, total: result.total }));
+      console.log('[ADMIN REPORTS] Reports fetched:', (result.data || []).length);
     } catch (error) {
-      console.error('Error fetching reports:', error);
+      console.error('[ADMIN REPORTS] Error fetching reports:', error);
+      setError(error.message || 'Failed to load reports');
       toast.error('Failed to load reports');
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.limit, statusFilter, typeFilter]);
+  }, [pagination.page, pagination.limit, statusFilter, typeFilter, authLoading, adminProfile?.id]);
 
   useEffect(() => {
-    fetchReports();
-  }, [fetchReports]);
+    if (!authLoading && adminProfile?.id) {
+      fetchReports();
+    } else if (authLoading) {
+      console.log('[ADMIN REPORTS] Waiting for auth to load...');
+    }
+  }, [fetchReports, authLoading, adminProfile?.id]);
 
   const openDetailModal = async (report) => {
     try {
-      const fullReport = await adminReports.getById(report.id);
+      const fullReport = await adminAPIClient.reports.get(report.id);
       setSelectedReport(fullReport);
       setShowDetailModal(true);
     } catch (error) {
@@ -88,15 +105,15 @@ const AdminReportsPage = () => {
 
       switch (actionType) {
         case 'resolve':
-          await adminReports.resolveReport(selectedReport.id, adminProfile.id, resolution);
+          await adminAPIClient.reports.resolve(selectedReport.id, resolution);
           toast.success('Report resolved successfully');
           break;
         case 'dismiss':
-          await adminReports.dismissReport(selectedReport.id, adminProfile.id, resolution);
+          await adminAPIClient.reports.dismiss(selectedReport.id, resolution);
           toast.success('Report dismissed');
           break;
         case 'escalate':
-          await adminReports.escalateReport(selectedReport.id, adminProfile.id, resolution);
+          await adminAPIClient.reports.escalate(selectedReport.id, resolution);
           toast.success('Report escalated');
           break;
         default:

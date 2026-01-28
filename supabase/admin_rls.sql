@@ -422,6 +422,14 @@ CREATE POLICY "admin_view_all_users" ON public.user_profiles
         OR user_id = auth.uid()
     );
 
+-- Allow admins to insert user profiles (for admin-created accounts if needed)
+DROP POLICY IF EXISTS "admin_insert_users" ON public.user_profiles;
+CREATE POLICY "admin_insert_users" ON public.user_profiles
+    FOR INSERT
+    WITH CHECK (
+        has_admin_permission(auth.uid(), 'super_admin')
+    );
+
 -- Allow admins to update any user (for moderation)
 DROP POLICY IF EXISTS "admin_update_users" ON public.user_profiles;
 CREATE POLICY "admin_update_users" ON public.user_profiles

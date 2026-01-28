@@ -32,34 +32,39 @@ import AdminSettingsPage from './pages/AdminSettingsPage';
 
 // Protected Route Component
 const ProtectedRoute = ({ children, requiredRole }) => {
-  const { isAuthenticated, loading, hasPermission, adminProfile } = useAdminAuth();
+  const { isAuthenticated, loading, initializing, hasPermission, adminProfile } = useAdminAuth();
 
   console.log('[PROTECTED ROUTE]', {
     loading,
+    initializing,
     isAuthenticated,
     adminProfile: adminProfile?.email,
     requiredRole,
   });
 
-  if (loading) {
+  // CRITICAL FIX: Wait for auth initialization to complete
+  // Use both 'loading' and 'initializing' flags
+  if (loading || initializing) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading admin panel...</p>
         </div>
       </div>
     );
   }
 
+  // After initialization is complete, check if authenticated
   if (!isAuthenticated) {
     console.log('[PROTECTED ROUTE] Not authenticated, redirecting to login');
-    return <Navigate to="login" replace />;
+    return <Navigate to="/admin/login" replace />;
   }
 
+  // Check role permissions if required
   if (requiredRole && !hasPermission(requiredRole)) {
     console.log('[PROTECTED ROUTE] Missing required role:', requiredRole);
-    return <Navigate to="/" replace />;
+    return <Navigate to="/admin" replace />;
   }
 
   return children;

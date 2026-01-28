@@ -13,11 +13,20 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
+// File upload constants
+export const ALLOWED_FILE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
+export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     autoRefreshToken: true,
-    persistSession: true,
+    persistSession: true,  // Changed to true to better handle sign out
     detectSessionInUrl: true,
+    storage: {
+      getItem: (key) => localStorage.getItem(key),
+      setItem: (key, value) => localStorage.setItem(key, value),
+      removeItem: (key) => localStorage.removeItem(key),
+    },
   },
   realtime: {
     params: {
@@ -72,8 +81,24 @@ export const auth = {
 
   // Sign out
   signOut: async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    try {
+      // Clear any tokens/state
+      sessionStorage.clear();
+      localStorage.removeItem('supabase-session');
+      
+      // Call Supabase sign out with global scope
+      const { error } = await supabase.auth.signOut({ scope: 'global' });
+      if (error) throw error;
+      
+      console.log('[AUTH] Sign out successful');
+    } catch (error) {
+      console.error('[AUTH] Sign out error:', error);
+      // Even if there's an error, try to clear the session locally
+      sessionStorage.clear();
+      localStorage.removeItem('supabase-session');
+      // Re-throw the error so it can be handled by caller
+      throw error;
+    }
   },
 
   // Get current user
@@ -200,27 +225,29 @@ export const db = {
       console.log('[db.items.create] Item payload:', JSON.stringify(itemPayload, null, 2));
       console.log('[db.items.create] Images to save:', images?.length || 0);
       
-      // Insert item first with timeout
-      const insertPromise = supabase
+      // Insert item 
+      console.log('[db.items.create] Inserting item into database...');
+      const { data, error } = await supabase
         .from('items')
         .insert(itemPayload)
         .select()
         .single();
       
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Database insert timeout: operation took longer than 15 seconds')), 15000);
-      });
-      
-      console.log('[db.items.create] Inserting item into database...');
-      const { data, error } = await Promise.race([insertPromise, timeoutPromise]);
-      
       if (error) {
-        console.error('[db.items.create] Supabase items insert error:', {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
-        });
+        // Log all possible error properties
+        console.error('[db.items.create] ====== DETAILED ERROR INFO ======');
+        console.error('[db.items.create] Status:', error.status);
+        console.error('[db.items.create] statusText:', error.statusText);
+        console.error('[db.items.create] Code:', error.code);
+        console.error('[db.items.create] Message:', error.message);
+        console.error('[db.items.create] Details:', error.details);
+        console.error('[db.items.create] Hint:', error.hint);
+        if (error.response) {
+          console.error('[db.items.create] Response body:', error.response.body);
+          console.error('[db.items.create] Response error:', error.response.error);
+        }
+        console.error('[db.items.create] Full error:', JSON.stringify(error, null, 2));
+        console.error('[db.items.create] ====== END ERROR INFO ======');
         throw error;
       }
       
@@ -249,16 +276,10 @@ export const db = {
         
         console.log('[db.items.create] Image records to insert:', imageRecords);
         
-        const imgInsertPromise = supabase
-          .from('item_images')
-          .insert(imageRecords);
-        
-        const imgTimeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Image records insert timeout')), 10000);
-        });
-        
         try {
-          const { error: imgError } = await Promise.race([imgInsertPromise, imgTimeoutPromise]);
+          const { error: imgError } = await supabase
+            .from('item_images')
+            .insert(imageRecords);
           
           if (imgError) {
             console.error('[db.items.create] Failed to insert item images:', imgError);
@@ -280,14 +301,24 @@ export const db = {
         .from('items')
         .select(`
           *,
-          category:categories(*),
-          area:areas(*),
+          category:categories(id, name, icon, slug, description),
+          area:areas(id, name, zone),
           finder:user_profiles!items_finder_id_fkey(user_id, full_name, avatar_url, trust_score, items_returned_count),
-          images:item_images(*)
+          images:item_images(id, image_url, storage_bucket, storage_path, is_primary)
         `)
         .eq('id', itemId)
         .single();
       if (error) throw error;
+      
+      // Count claims for this item
+      if (data) {
+        const { count: claimCount } = await supabase
+          .from('claims')
+          .select('*', { count: 'exact', head: true })
+          .eq('item_id', itemId);
+        data.claim_count = claimCount || 0;
+      }
+      
       return data;
     },
 
@@ -297,14 +328,18 @@ export const db = {
           .from('items')
           .select(`
             *,
-            category:categories(name, icon),
-            area:areas(name, zone),
+            category:categories(id, name, icon, slug),
+            area:areas(id, name, zone),
             images:item_images(id, image_url, storage_bucket, storage_path, is_primary)
           `, { count: 'exact' });
 
-        // Filter by status - 'unclaimed' UI maps to 'active' in DB
+        // Filter by status - map UI values to DB enum values
+        // DB enum: active, claimed, returned, expired, removed
         if (filters.status === 'unclaimed' || filters.status === 'active') {
           query = query.eq('status', 'active');
+        } else if (filters.status === 'pending') {
+          // "pending" in UI means "claimed" in DB (item has been claimed but not returned)
+          query = query.eq('status', 'claimed');
         } else if (filters.status) {
           query = query.eq('status', filters.status);
         }
@@ -498,7 +533,7 @@ export const db = {
         .from('claims')
         .select(`
           *,
-          claimant:user_profiles!claims_claimant_id_fkey(user_id, full_name, avatar_url, trust_score)
+          claimant:user_profiles(user_id, full_name, avatar_url, trust_score)
         `)
         .eq('item_id', itemId)
         .order('created_at', { ascending: false });
@@ -614,7 +649,6 @@ export const db = {
           claim_id: claimId,
           finder_id: finderId,
           claimant_id: claimantId,
-          is_active: true,
         })
         .select()
         .single();
@@ -632,7 +666,7 @@ export const db = {
             title,
             images:item_images(id, image_url, storage_bucket, storage_path, is_primary)
           ),
-          messages:messages(id, message, created_at, sender_id, is_read)
+          messages:messages(id, message_text, created_at, sender_id, is_read)
         `)
         .or(`finder_id.eq.${userId},claimant_id.eq.${userId}`)
         .order('updated_at', { ascending: false });
@@ -685,7 +719,7 @@ export const db = {
         .from('messages')
         .select(`
           *,
-          sender:user_profiles!messages_sender_id_fkey(user_id, full_name, avatar_url)
+          sender:user_profiles(user_id, full_name, avatar_url)
         `)
         .eq('chat_id', chatId)
         .eq('is_deleted', false)
@@ -738,9 +772,9 @@ export const db = {
         .from('abuse_reports')
         .select(`
           *,
-          reporter:user_profiles!abuse_reports_reporter_id_fkey(user_id, full_name, email),
-          target_user:user_profiles!abuse_reports_target_user_id_fkey(user_id, full_name, email),
-          target_item:items!abuse_reports_target_item_id_fkey(id, title)
+          reporter:user_profiles!reporter_id(user_id, full_name, email),
+          target_user:user_profiles!target_user_id(user_id, full_name, email),
+          target_item:items!target_item_id(id, title)
         `)
         .order('created_at', { ascending: false });
       
@@ -813,7 +847,7 @@ export const db = {
         .from('audit_logs')
         .select(`
           *,
-          user:user_profiles!audit_logs_user_id_fkey(user_id, full_name)
+          user:user_profiles(user_id, full_name)
         `)
         .order('created_at', { ascending: false })
         .limit(limit);
@@ -902,9 +936,9 @@ export const db = {
         .from('items')
         .select(`
           *,
-          category:categories(name, icon),
-          area:areas(name),
-          finder:user_profiles!items_finder_id_fkey(user_id, full_name, email),
+          category:categories(id, name, icon, slug),
+          area:areas(id, name, zone),
+          finder:user_profiles!items_finder_id_fkey(user_id, full_name, email, avatar_url, trust_score),
           images:item_images(id, image_url, storage_bucket, storage_path, is_primary)
         `, { count: 'exact' });
 
@@ -1010,37 +1044,38 @@ export const db = {
 export const storage = {
   // Upload item image with timeout protection
   uploadItemImage: async (file, userId) => {
+    if (!userId) {
+      throw new Error('User ID is required for image upload');
+    }
+    
     console.log('[storage.uploadItemImage] Starting upload for:', file.name);
     console.log('[storage.uploadItemImage] File size:', file.size, 'bytes');
     console.log('[storage.uploadItemImage] User ID:', userId);
+    console.log('[storage.uploadItemImage] Bucket: item-images');
+    
+    // Validate file
+    if (file.size > MAX_FILE_SIZE) {
+      throw new Error('File is larger than 5MB limit');
+    }
+    
+    if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+      throw new Error(`Invalid file type: ${file.type}. Allowed: JPEG, PNG, WebP, GIF`);
+    }
     
     const fileExt = file.name.split('.').pop();
     const fileName = `${userId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
     console.log('[storage.uploadItemImage] Target path:', fileName);
     
-    // Add timeout protection (20 seconds)
-    const uploadPromise = supabase.storage
+    console.log('[storage.uploadItemImage] Calling Supabase storage upload...');
+    
+    // Remove Promise.race timeout - Supabase has its own internal timeouts
+    // Small files should not timeout after 20 seconds
+    const { data, error } = await supabase.storage
       .from('item-images')
       .upload(fileName, file, {
         cacheControl: '3600',
         upsert: false,
       });
-    
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Upload timeout: operation took longer than 20 seconds')), 20000);
-    });
-    
-    console.log('[storage.uploadItemImage] Calling Supabase storage upload...');
-    let result;
-    try {
-      result = await Promise.race([uploadPromise, timeoutPromise]);
-    } catch (err) {
-      console.error('[storage.uploadItemImage] Promise.race error:', err);
-      throw err;
-    }
-    
-    console.log('[storage.uploadItemImage] Upload response:', result);
-    const { data, error } = result;
     
     if (error) {
       console.error('[storage.uploadItemImage] Storage upload error:', {
@@ -1048,12 +1083,20 @@ export const storage = {
         statusCode: error.statusCode,
         error: error.error,
       });
+      
+      // Provide more helpful error messages
+      if (error.message?.includes('policy')) {
+        throw new Error('Upload policy error. Please ensure you are logged in and your folder path is correct.');
+      } else if (error.message?.includes('not found')) {
+        throw new Error('Storage bucket "item-images" not found. Please run the SQL migration first.');
+      }
+      
       throw error;
     }
     
     if (!data?.path) {
       console.error('[storage.uploadItemImage] No path in response!', data);
-      throw new Error('Upload failed: no path returned');
+      throw new Error('Upload failed: no path returned from Supabase');
     }
     
     console.log('[storage.uploadItemImage] Upload successful, path:', data.path);
@@ -1064,58 +1107,104 @@ export const storage = {
     
     console.log('[storage.uploadItemImage] Public URL:', publicUrl);
     
+    if (!publicUrl) {
+      throw new Error('Failed to generate public URL for uploaded image');
+    }
+    
     return {
       path: data.path,
       publicUrl,
     };
   },
 
-  // Upload claim proof image
+  // Upload claim proof image - use item-images bucket
   uploadClaimImage: async (file, userId) => {
     const fileExt = file.name.split('.').pop();
-    const fileName = `${userId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    // RLS policy expects: {userId}/{path} format
+    // So use: {userId}/claims/{timestamp}-{random}.{ext}
+    const fileName = `${userId}/claims/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
     
-    const { data, error } = await supabase.storage
-      .from('claims')
-      .upload(fileName, file, {
-        cacheControl: '3600',
-        upsert: false,
-      });
+    console.log('[storage.uploadClaimImage] Starting upload');
+    console.log('[storage.uploadClaimImage] File name:', file.name);
+    console.log('[storage.uploadClaimImage] Storage path:', fileName);
+    console.log('[storage.uploadClaimImage] User ID:', userId);
     
-    if (error) throw error;
-    
-    const { data: { publicUrl } } = supabase.storage
-      .from('claims')
-      .getPublicUrl(data.path);
-    
-    return {
-      path: data.path,
-      publicUrl,
-    };
+    try {
+      // Upload to item-images bucket
+      const { data, error } = await supabase.storage
+        .from('item-images')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: false,
+        });
+      
+      if (error) {
+        console.error('[storage.uploadClaimImage] Upload error:', error);
+        throw error;
+      }
+      
+      console.log('[storage.uploadClaimImage] Upload successful, path:', data.path);
+      
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('item-images')
+        .getPublicUrl(data.path);
+      
+      console.log('[storage.uploadClaimImage] Public URL:', publicUrl);
+      
+      return {
+        path: data.path,
+        publicUrl,
+      };
+    } catch (error) {
+      console.error('[storage.uploadClaimImage] Fatal error:', error);
+      throw error;
+    }
   },
 
-  // Upload avatar
+  // Upload avatar - use item-images bucket
   uploadAvatar: async (file, userId) => {
     const fileExt = file.name.split('.').pop();
+    // RLS policy expects: {userId}/{path} format
+    // So use: {userId}/avatar.{ext}
     const fileName = `${userId}/avatar.${fileExt}`;
     
-    const { data, error } = await supabase.storage
-      .from('avatars')
-      .upload(fileName, file, {
-        cacheControl: '3600',
-        upsert: true,
-      });
+    console.log('[storage.uploadAvatar] Starting upload');
+    console.log('[storage.uploadAvatar] File name:', file.name);
+    console.log('[storage.uploadAvatar] Storage path:', fileName);
+    console.log('[storage.uploadAvatar] User ID:', userId);
     
-    if (error) throw error;
-    
-    const { data: { publicUrl } } = supabase.storage
-      .from('avatars')
-      .getPublicUrl(data.path);
-    
-    return {
-      path: data.path,
-      publicUrl,
-    };
+    try {
+      // Upload to item-images bucket
+      const { data, error } = await supabase.storage
+        .from('item-images')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: true,
+        });
+      
+      if (error) {
+        console.error('[storage.uploadAvatar] Upload error:', error);
+        throw error;
+      }
+      
+      console.log('[storage.uploadAvatar] Upload successful, path:', data.path);
+      
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('item-images')
+        .getPublicUrl(data.path);
+      
+      console.log('[storage.uploadAvatar] Public URL:', publicUrl);
+      
+      return {
+        path: data.path,
+        publicUrl,
+      };
+    } catch (error) {
+      console.error('[storage.uploadAvatar] Fatal error:', error);
+      throw error;
+    }
   },
 
   // Delete image

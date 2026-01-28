@@ -6,7 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAdminAuth } from '../contexts/AdminAuthContext';
-import { adminClaims } from '../lib/adminSupabase';
+import { adminAPIClient } from '../lib/apiClient';
 import {
   Search,
   FileText,
@@ -28,11 +28,12 @@ import {
 import toast from 'react-hot-toast';
 
 const AdminClaimsPage = () => {
-  const { adminProfile, isSuperAdmin, isModerator } = useAdminAuth();
+  const { adminProfile, isSuperAdmin, isModerator, loading: authLoading } = useAdminAuth();
   const [searchParams] = useSearchParams();
   
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0 });
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
   const [lockedOnly, setLockedOnly] = useState(searchParams.get('locked') === 'true');
@@ -47,32 +48,48 @@ const AdminClaimsPage = () => {
   const [actionLoading, setActionLoading] = useState(false);
 
   const fetchClaims = useCallback(async () => {
+    // Guard: only fetch if auth is ready
+    if (authLoading || !adminProfile?.id) {
+      console.log('[ADMIN CLAIMS] Auth not ready, skipping fetch');
+      setLoading(false);
+      return;
+    }
+
     try {
+      console.log('[ADMIN CLAIMS] Fetching claims...');
       setLoading(true);
-      const result = await adminClaims.getAll({
+      setError(null);
+
+      const result = await adminAPIClient.claims.getAll({
         page: pagination.page,
         limit: pagination.limit,
         status: statusFilter || undefined,
         locked: lockedOnly || undefined,
         disputed: disputedOnly || undefined,
       });
-      setClaims(result.data);
+      setClaims(result.data || []);
       setPagination(prev => ({ ...prev, total: result.total }));
-    } catch (error) {
-      console.error('Error fetching claims:', error);
+      console.log('[ADMIN CLAIMS] Claims fetched:', (result.data || []).length);
+    } catch (err) {
+      console.error('[ADMIN CLAIMS] Error fetching claims:', err);
+      setError(err.message || 'Failed to load claims');
       toast.error('Failed to load claims');
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.limit, statusFilter, lockedOnly, disputedOnly]);
+  }, [pagination.page, pagination.limit, statusFilter, lockedOnly, disputedOnly, authLoading, adminProfile?.id]);
 
   useEffect(() => {
-    fetchClaims();
-  }, [fetchClaims]);
+    if (!authLoading && adminProfile?.id) {
+      fetchClaims();
+    } else if (authLoading) {
+      console.log('[ADMIN CLAIMS] Waiting for auth to load...');
+    }
+  }, [fetchClaims, authLoading, adminProfile?.id]);
 
   const openDetailModal = async (claim) => {
     try {
-      const fullClaim = await adminClaims.getById(claim.id);
+      const fullClaim = await adminAPIClient.claims.get(claim.id);
       setSelectedClaim(fullClaim);
       setShowDetailModal(true);
     } catch (error) {
@@ -97,27 +114,27 @@ const AdminClaimsPage = () => {
 
       switch (actionType) {
         case 'lock':
-          await adminClaims.lockClaim(selectedClaim.id, adminProfile.id, reason);
+          await adminAPIClient.claims.lock(selectedClaim.id, reason);
           toast.success('Claim locked successfully');
           break;
         case 'unlock':
-          await adminClaims.unlockClaim(selectedClaim.id, adminProfile.id, reason);
+          await adminAPIClient.claims.unlock(selectedClaim.id, reason);
           toast.success('Claim unlocked successfully');
           break;
         case 'approve':
-          await adminClaims.overrideClaim(selectedClaim.id, 'approved', adminProfile.id, reason);
+          await adminAPIClient.claims.approve(selectedClaim.id);
           toast.success('Claim approved by admin override');
           break;
         case 'reject':
-          await adminClaims.overrideClaim(selectedClaim.id, 'rejected', adminProfile.id, reason);
+          await adminAPIClient.claims.reject(selectedClaim.id, reason);
           toast.success('Claim rejected by admin override');
           break;
         case 'flag_dispute':
-          await adminClaims.flagDispute(selectedClaim.id, adminProfile.id, reason);
+          await adminAPIClient.claims.flagDispute(selectedClaim.id, reason);
           toast.success('Claim flagged as disputed');
           break;
         case 'resolve_dispute':
-          await adminClaims.resolveDispute(selectedClaim.id, adminProfile.id, reason);
+          await adminAPIClient.claims.resolveDispute(selectedClaim.id, 'resolved', reason);
           toast.success('Dispute resolved');
           break;
         default:
@@ -137,7 +154,7 @@ const AdminClaimsPage = () => {
   const handleAddNote = async (noteText) => {
     try {
       setActionLoading(true);
-      await adminClaims.addNote(selectedClaim.id, adminProfile.id, noteText);
+      await adminAPIClient.claims.addNote(selectedClaim.id, noteText);
       toast.success('Note added successfully');
       setShowNoteModal(false);
       fetchClaims();
@@ -464,7 +481,7 @@ const ClaimDetailModal = ({ claim, onClose }) => {
   useEffect(() => {
     const fetchNotes = async () => {
       try {
-        const notes = await adminClaims.getNotes(claim.id);
+        const notes = await adminAPIClient.claims.getNotes(claim.id);
         setAdminNotes(notes);
       } catch (error) {
         console.error('Error fetching notes:', error);

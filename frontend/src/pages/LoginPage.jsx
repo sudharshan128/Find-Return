@@ -75,7 +75,7 @@ const StatCounter = ({ value, label }) => (
 );
 
 const LoginPage = () => {
-  const { signInWithGoogle, loading, isAuthenticated } = useAuth();
+  const { signInWithGoogle, initializing, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [error, setError] = useState(null);
@@ -88,7 +88,7 @@ const LoginPage = () => {
   }, [isAuthenticated, navigate]);
 
   const handleGoogleSignIn = async () => {
-    if (isSigningIn || loading) return; // Prevent double-click
+    if (isSigningIn || initializing) return; // Prevent double-click
     
     setIsSigningIn(true);
     setError(null);
@@ -125,7 +125,7 @@ const LoginPage = () => {
     },
   ];
 
-  const isButtonDisabled = isSigningIn || loading;
+  const isButtonDisabled = isSigningIn || initializing;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-primary-50/40 relative overflow-hidden">

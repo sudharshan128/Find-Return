@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAdminAuth } from '../contexts/AdminAuthContext';
-import { adminSettings } from '../lib/adminSupabase';
+import { adminAPIClient } from '../lib/apiClient';
 import {
   Settings,
   Save,
@@ -24,10 +24,11 @@ import {
 import toast from 'react-hot-toast';
 
 const AdminSettingsPage = () => {
-  const { isSuperAdmin, adminProfile } = useAdminAuth();
+  const { isSuperAdmin, adminProfile, loading: authLoading } = useAdminAuth();
   
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('general');
 
@@ -43,9 +44,18 @@ const AdminSettingsPage = () => {
   };
 
   const fetchSettings = async () => {
+    if (authLoading) {
+      console.log('[ADMIN SETTINGS] Auth not ready, skipping fetch');
+      setLoading(false);
+      return;
+    }
+
     try {
+      console.log('[ADMIN SETTINGS] Fetching settings...');
       setLoading(true);
-      const data = await adminSettings.getAll();
+      setError(null);
+
+      const data = await adminAPIClient.settings.get();
       
       // Convert array to object for easier access
       // Use setting_key as the key (database column name)
@@ -67,18 +77,26 @@ const AdminSettingsPage = () => {
   };
 
   useEffect(() => {
-    fetchSettings();
-  }, []);
+    if (!authLoading) {
+      console.log('[ADMIN SETTINGS] Auth ready. Super admin:', isSuperAdmin());
+      fetchSettings();
+    }
+  }, [authLoading]);
 
   const handleSettingChange = (key, value) => {
-    setSettings(prev => ({
-      ...prev,
-      [key]: {
-        ...prev[key],
-        value: value,
-        modified: true,
-      }
-    }));
+    console.log('[SETTINGS] Changing setting:', key, 'to', value);
+    setSettings(prev => {
+      const updated = {
+        ...prev,
+        [key]: {
+          ...prev[key],
+          value: value,
+          modified: true,
+        }
+      };
+      console.log('[SETTINGS] Updated state:', updated[key]);
+      return updated;
+    });
   };
 
   const handleSave = async () => {
@@ -98,7 +116,7 @@ const AdminSettingsPage = () => {
         return;
       }
 
-      await adminSettings.updateMultiple(modifiedSettings, adminProfile?.id);
+      await adminAPIClient.settings.update(modifiedSettings);
       
       // Clear modified flags
       const updatedSettings = { ...settings };
@@ -134,16 +152,25 @@ const AdminSettingsPage = () => {
     switch (type) {
       case 'boolean':
         return (
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={value === true || value === 'true'}
-              onChange={(e) => handleSettingChange(settingKey, e.target.checked)}
-              disabled={!isSuperAdmin()}
-              className="sr-only peer"
+          <button
+            type="button"
+            onClick={() => {
+              if (isSuperAdmin()) {
+                const newValue = !(value === true || value === 'true');
+                handleSettingChange(settingKey, newValue);
+              }
+            }}
+            disabled={!isSuperAdmin()}
+            className={`relative inline-flex items-center h-6 w-11 rounded-full transition-colors focus:outline-none focus:ring-4 focus:ring-indigo-300 ${
+              value === true || value === 'true' ? 'bg-indigo-600' : 'bg-gray-200'
+            } ${isModified ? 'ring-2 ring-yellow-400' : ''} ${!isSuperAdmin() ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white border border-gray-300 transition-transform ${
+                value === true || value === 'true' ? 'translate-x-6' : 'translate-x-0.5'
+              }`}
             />
-            <div className={`w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 ${isModified ? 'ring-2 ring-yellow-400' : ''}`}></div>
-          </label>
+          </button>
         );
       
       case 'number':

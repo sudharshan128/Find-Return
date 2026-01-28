@@ -10,6 +10,8 @@
  * - Audit log integrity verification
  */
 
+import adminAPIClient from './apiClient';
+
 // ============================================================
 // CLIENT INFO CACHE
 // ============================================================
@@ -56,22 +58,37 @@ export const getClientInfo = async (supabase, useCache = true) => {
   }
   
   try {
-    // Call edge function with timeout (5 seconds max)
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
-    const { data, error } = await supabase.functions.invoke('get-client-info', {
-      method: 'POST',
-      body: {},
-      signal: controller.signal,
-    });
-    
-    clearTimeout(timeoutId);
-    
-    if (error) {
-      console.warn('[Security] Could not get client info from edge function:', error.message);
-      return createFallbackClientInfo();
-    }
+    // Prefer calling backend admin API when available (keeps admin pages from calling Supabase directly)
+    if (adminAPIClient && adminAPIClient.accessToken) {
+        const resp = await adminAPIClient.request('GET', '/api/admin/client-info');
+        if (resp && resp.ip_address) {
+          const data = resp;
+          // Cache the result
+          clientInfoCache = {
+            ip_address: data.ip_address,
+            user_agent: data.user_agent || navigator.userAgent || 'unknown',
+            language: data.language || navigator.language || 'unknown',
+            referrer: data.referrer || document.referrer || '',
+            metadata: data.metadata || {},
+          };
+          clientInfoCacheTime = now;
+          return clientInfoCache;
+        }
+      }
+
+      // Fallback: call Supabase edge function if backend not configured or call failed
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const { data, error } = await supabase.functions.invoke('get-client-info', {
+        method: 'POST',
+        body: {},
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (error) {
+        console.warn('[Security] Could not get client info from edge function:', error.message);
+        return createFallbackClientInfo();
+      }
     
     // Validate response shape
     if (!data || typeof data.ip_address !== 'string') {
@@ -277,15 +294,46 @@ export const isSessionRevoked = async (supabase, adminId) => {
   // Periodically check server for revocations
   if (now - lastRevocationCheck > REVOCATION_CHECK_INTERVAL) {
     try {
+      // Prefer backend profile check when available
+      if (adminAPIClient && adminAPIClient.accessToken) {
+        try {
+          const profile = await adminAPIClient.auth.profile();
+          const data = profile || {};
+          // Backend returns current admin profile; check revocation fields if present
+          if (data.force_logout_at) {
+            const forceLogoutTime = new Date(data.force_logout_at).getTime();
+            const oneHourAgo = now - (60 * 60 * 1000);
+            if (forceLogoutTime > oneHourAgo) {
+              revokedSessions.add(adminId);
+              return true;
+            }
+          }
+
+          if (data.session_revoked_at) {
+            const sessionStart = localStorage.getItem('admin-session-start');
+            if (sessionStart) {
+              const startTime = new Date(sessionStart).getTime();
+              const revokeTime = new Date(data.session_revoked_at).getTime();
+              if (revokeTime > startTime) {
+                revokedSessions.add(adminId);
+                return true;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[Security] Backend profile check failed, falling back to Supabase query');
+        }
+      }
+
+      // Fallback: direct Supabase query (legacy)
       const { data, error } = await supabase
         .from('admin_users')
         .select('force_logout_at, session_revoked_at')
         .eq('id', adminId)
         .single();
-      
+
       if (error) throw error;
-      
-      // Check if forced logout timestamp is recent (within last hour)
+
       if (data?.force_logout_at) {
         const forceLogoutTime = new Date(data.force_logout_at).getTime();
         const oneHourAgo = now - (60 * 60 * 1000);
@@ -294,8 +342,7 @@ export const isSessionRevoked = async (supabase, adminId) => {
           return true;
         }
       }
-      
-      // Check session revocation
+
       if (data?.session_revoked_at) {
         const sessionStart = localStorage.getItem('admin-session-start');
         if (sessionStart) {
@@ -307,7 +354,7 @@ export const isSessionRevoked = async (supabase, adminId) => {
           }
         }
       }
-      
+
       lastRevocationCheck = now;
     } catch (error) {
       console.error('Error checking session revocation:', error);

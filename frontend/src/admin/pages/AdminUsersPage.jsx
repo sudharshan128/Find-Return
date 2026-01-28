@@ -6,7 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAdminAuth } from '../contexts/AdminAuthContext';
-import { adminUsers } from '../lib/adminSupabase';
+import { adminAPIClient } from '../lib/apiClient';
 import {
   Search,
   Filter,
@@ -27,11 +27,12 @@ import {
 import toast from 'react-hot-toast';
 
 const AdminUsersPage = () => {
-  const { adminProfile, isSuperAdmin, isModerator } = useAdminAuth();
+  const { adminProfile, isSuperAdmin, isModerator, loading: authLoading } = useAdminAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0 });
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
@@ -45,8 +46,18 @@ const AdminUsersPage = () => {
   const [actionLoading, setActionLoading] = useState(false);
 
   const fetchUsers = useCallback(async () => {
+    // Guard: only fetch if auth is ready
+    if (authLoading || !adminProfile?.id) {
+      console.log('[ADMIN USERS] Auth not ready, skipping fetch');
+      setLoading(false);
+      return;
+    }
+
     try {
+      console.log('[ADMIN USERS] Fetching users...');
       setLoading(true);
+      setError(null);
+
       const params = {
         page: pagination.page,
         limit: pagination.limit,
@@ -54,10 +65,10 @@ const AdminUsersPage = () => {
         status: statusFilter || undefined,
       };
 
-      const result = await adminUsers.getAll(params);
+      const result = await adminAPIClient.users.getAll(params);
       
       // Apply trust filter client-side
-      let filteredData = result.data;
+      let filteredData = result.data || [];
       if (trustFilter === 'low') {
         filteredData = filteredData.filter(u => u.trust_score < 40);
       } else if (trustFilter === 'high') {
@@ -66,17 +77,23 @@ const AdminUsersPage = () => {
 
       setUsers(filteredData);
       setPagination(prev => ({ ...prev, total: result.total }));
+      console.log('[ADMIN USERS] Users fetched:', filteredData.length);
     } catch (error) {
-      console.error('Error fetching users:', error);
+      console.error('[ADMIN USERS] Error fetching users:', error);
+      setError(error.message || 'Failed to load users');
       toast.error('Failed to load users');
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.limit, search, statusFilter, trustFilter]);
+  }, [pagination.page, pagination.limit, search, statusFilter, trustFilter, authLoading, adminProfile?.id]);
 
   useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
+    if (!authLoading && adminProfile?.id) {
+      fetchUsers();
+    } else if (authLoading) {
+      console.log('[ADMIN USERS] Waiting for auth to load...');
+    }
+  }, [fetchUsers, authLoading, adminProfile?.id]);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -101,7 +118,7 @@ const AdminUsersPage = () => {
       
       switch (actionType) {
         case 'warn':
-          await adminUsers.warnUser(selectedUser.user_id, adminProfile.id, {
+          await adminAPIClient.users.warn(selectedUser.user_id, {
             type: formData.warningType,
             severity: formData.severity,
             title: formData.title,
@@ -111,11 +128,10 @@ const AdminUsersPage = () => {
           break;
           
         case 'suspend':
-          await adminUsers.suspendUser(
-            selectedUser.user_id,
-            formData.reason,
-            formData.duration || null
-          );
+          await adminAPIClient.users.suspend(selectedUser.user_id, {
+            reason: formData.reason,
+            duration: formData.duration || null,
+          });
           toast.success('User suspended successfully');
           break;
           
@@ -126,17 +142,17 @@ const AdminUsersPage = () => {
             setActionLoading(false);
             return;
           }
-          await adminUsers.banUser(selectedUser.user_id, formData.reason);
+          await adminAPIClient.users.ban(selectedUser.user_id, formData.reason);
           toast.success('User banned successfully');
           break;
           
         case 'unban':
-          await adminUsers.unbanUser(selectedUser.user_id, adminProfile.id, formData.reason);
+          await adminAPIClient.users.unban(selectedUser.user_id);
           toast.success('User unbanned successfully');
           break;
           
         case 'adjust_trust':
-          await adminUsers.adjustTrustScore(
+          await adminAPIClient.users.adjustTrustScore(
             selectedUser.user_id,
             formData.newScore,
             formData.reason
@@ -145,22 +161,22 @@ const AdminUsersPage = () => {
           break;
           
         case 'disable_chat':
-          await adminUsers.disableChat(selectedUser.user_id, adminProfile.id, formData.reason);
+          await adminAPIClient.users.disableChat(selectedUser.user_id, formData.reason);
           toast.success('Chat disabled for user');
           break;
           
         case 'enable_chat':
-          await adminUsers.enableChat(selectedUser.user_id);
+          await adminAPIClient.users.enableChat(selectedUser.user_id);
           toast.success('Chat enabled for user');
           break;
           
         case 'block_claims':
-          await adminUsers.blockClaims(selectedUser.user_id, adminProfile.id, formData.reason);
+          await adminAPIClient.users.blockClaims(selectedUser.user_id, formData.reason);
           toast.success('Claims blocked for user');
           break;
           
         case 'unblock_claims':
-          await adminUsers.unblockClaims(selectedUser.user_id);
+          await adminAPIClient.users.unblockClaims(selectedUser.user_id);
           toast.success('Claims unblocked for user');
           break;
           
@@ -549,10 +565,10 @@ const UserDetailModal = ({ user, isOpen, onClose }) => {
     setLoading(true);
     try {
       const [userItems, userClaims, userWarnings, history] = await Promise.all([
-        adminUsers.getUserItems(user.user_id),
-        adminUsers.getUserClaims(user.user_id),
-        adminUsers.getUserWarnings(user.user_id),
-        adminUsers.getTrustHistory(user.user_id),
+        adminAPIClient.users.getUserItems(user.user_id),
+        adminAPIClient.users.getUserClaims(user.user_id),
+        adminAPIClient.users.getUserWarnings(user.user_id),
+        adminAPIClient.users.getTrustHistory(user.user_id),
       ]);
       setItems(userItems);
       setClaims(userClaims);

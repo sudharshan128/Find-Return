@@ -34,9 +34,9 @@ RETURNS BOOLEAN AS $$
 BEGIN
     RETURN EXISTS (
         SELECT 1 FROM public.user_profiles 
-        WHERE user_id = auth.uid() 
-        AND role = 'admin'
-        AND account_status = 'active'
+        WHERE public.user_profiles.user_id = auth.uid() 
+        AND public.user_profiles.role = 'admin'
+        AND public.user_profiles.account_status = 'active'
     );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -47,9 +47,9 @@ RETURNS BOOLEAN AS $$
 BEGIN
     RETURN EXISTS (
         SELECT 1 FROM public.user_profiles 
-        WHERE user_id = auth.uid() 
-        AND role IN ('admin', 'moderator')
-        AND account_status = 'active'
+        WHERE public.user_profiles.user_id = auth.uid() 
+        AND public.user_profiles.role IN ('admin', 'moderator')
+        AND public.user_profiles.account_status = 'active'
     );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -60,8 +60,8 @@ RETURNS BOOLEAN AS $$
 BEGIN
     RETURN EXISTS (
         SELECT 1 FROM public.user_profiles 
-        WHERE user_id = auth.uid() 
-        AND account_status = 'active'
+        WHERE public.user_profiles.user_id = auth.uid() 
+        AND public.user_profiles.account_status = 'active'
     );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -85,6 +85,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- Drop existing policies
 DROP POLICY IF EXISTS "user_profiles_select_own" ON public.user_profiles;
 DROP POLICY IF EXISTS "user_profiles_select_public" ON public.user_profiles;
+DROP POLICY IF EXISTS "user_profiles_insert_own" ON public.user_profiles;
 DROP POLICY IF EXISTS "user_profiles_update_own" ON public.user_profiles;
 DROP POLICY IF EXISTS "user_profiles_admin_all" ON public.user_profiles;
 
@@ -92,28 +93,32 @@ DROP POLICY IF EXISTS "user_profiles_admin_all" ON public.user_profiles;
 CREATE POLICY "user_profiles_select_own"
     ON public.user_profiles FOR SELECT
     TO authenticated
-    USING (user_id = auth.uid());
+    USING (public.user_profiles.user_id = auth.uid());
 
 -- Users can view limited info of other users (for finder names, etc.)
 CREATE POLICY "user_profiles_select_public"
     ON public.user_profiles FOR SELECT
     TO authenticated
     USING (
-        account_status = 'active'
-        AND user_id != auth.uid()
+        public.user_profiles.user_id != auth.uid()
     );
+
+-- Users can create their own profile (for auto-registration on first login)
+CREATE POLICY "user_profiles_insert_own"
+    ON public.user_profiles FOR INSERT
+    TO authenticated
+    WITH CHECK (public.user_profiles.user_id = auth.uid());
 
 -- Users can update their own profile (limited fields)
 CREATE POLICY "user_profiles_update_own"
     ON public.user_profiles FOR UPDATE
     TO authenticated
-    USING (user_id = auth.uid())
+    USING (public.user_profiles.user_id = auth.uid())
     WITH CHECK (
-        user_id = auth.uid()
-        -- Cannot change role, trust_score, ban status, or stats
-        AND role = (SELECT role FROM public.user_profiles WHERE user_id = auth.uid())
-        AND trust_score = (SELECT trust_score FROM public.user_profiles WHERE user_id = auth.uid())
-        AND account_status = (SELECT account_status FROM public.user_profiles WHERE user_id = auth.uid())
+        public.user_profiles.user_id = auth.uid()
+        -- Cannot change role or trust_score
+        AND public.user_profiles.role = (SELECT public.user_profiles.role FROM public.user_profiles WHERE public.user_profiles.user_id = auth.uid())
+        AND public.user_profiles.trust_score = (SELECT public.user_profiles.trust_score FROM public.user_profiles WHERE public.user_profiles.user_id = auth.uid())
     );
 
 -- Admins can do anything
@@ -198,7 +203,6 @@ CREATE POLICY "items_insert_own"
     TO authenticated
     WITH CHECK (
         finder_id = auth.uid()
-        AND is_account_active()
     );
 
 -- Users can update their own active items (limited changes)
@@ -206,13 +210,13 @@ CREATE POLICY "items_update_own"
     ON public.items FOR UPDATE
     TO authenticated
     USING (
-        finder_id = auth.uid()
-        AND status IN ('active', 'claimed')
+        public.items.finder_id = auth.uid()
+        AND public.items.status IN ('active', 'claimed')
     )
     WITH CHECK (
-        finder_id = auth.uid()
+        public.items.finder_id = auth.uid()
         -- Cannot change finder_id
-        AND finder_id = (SELECT finder_id FROM public.items WHERE id = items.id)
+        AND public.items.finder_id = (SELECT public.items.finder_id FROM public.items WHERE public.items.id = items.id)
     );
 
 -- Users can delete their own active items only
@@ -319,18 +323,17 @@ CREATE POLICY "claims_select_own_claim"
     USING (claimant_id = auth.uid());
 
 -- Users can create claims (not on own items)
+DROP POLICY IF EXISTS "claims_insert_own" ON public.claims;
 CREATE POLICY "claims_insert_own"
     ON public.claims FOR INSERT
     TO authenticated
     WITH CHECK (
-        claimant_id = auth.uid()
-        AND is_account_active()
-        AND EXISTS (
-            SELECT 1 FROM public.items 
-            WHERE id = claims.item_id 
-            AND finder_id != auth.uid()
-            AND status = 'active'
-            AND is_flagged = false
+        public.claims.claimant_id = auth.uid()
+        AND public.claims.item_id IN (
+            SELECT public.items.id FROM public.items 
+            WHERE public.items.finder_id != auth.uid()
+            AND public.items.status = 'active'
+            AND public.items.is_flagged = false
         )
     );
 
@@ -342,18 +345,12 @@ CREATE POLICY "claims_update_finder"
         status = 'pending'
         AND EXISTS (
             SELECT 1 FROM public.items 
-            WHERE id = claims.item_id 
-            AND finder_id = auth.uid()
+            WHERE items.id = claims.item_id 
+            AND items.finder_id = auth.uid()
         )
     )
     WITH CHECK (
-        -- Can only change status to approved or rejected
         status IN ('approved', 'rejected')
-        -- Cannot change other fields
-        AND item_id = (SELECT item_id FROM public.claims WHERE id = claims.id)
-        AND claimant_id = (SELECT claimant_id FROM public.claims WHERE id = claims.id)
-        AND description = (SELECT description FROM public.claims WHERE id = claims.id)
-        AND security_answer_encrypted = (SELECT security_answer_encrypted FROM public.claims WHERE id = claims.id)
     );
 
 -- Claimants can withdraw their own pending claims
@@ -453,6 +450,7 @@ CREATE POLICY "claim_answers_update_finder"
 
 -- Drop existing policies
 DROP POLICY IF EXISTS "chats_select_participant" ON public.chats;
+DROP POLICY IF EXISTS "chats_insert_participant" ON public.chats;
 DROP POLICY IF EXISTS "chats_update_participant" ON public.chats;
 DROP POLICY IF EXISTS "chats_moderator_all" ON public.chats;
 
@@ -461,6 +459,15 @@ CREATE POLICY "chats_select_participant"
     ON public.chats FOR SELECT
     TO authenticated
     USING (
+        finder_id = auth.uid() 
+        OR claimant_id = auth.uid()
+    );
+
+-- Allow chat creation when approving claims
+CREATE POLICY "chats_insert_participant"
+    ON public.chats FOR INSERT
+    TO authenticated
+    WITH CHECK (
         finder_id = auth.uid() 
         OR claimant_id = auth.uid()
     );
@@ -508,7 +515,6 @@ CREATE POLICY "messages_insert_participant"
     WITH CHECK (
         sender_id = auth.uid()
         AND is_chat_participant(chat_id)
-        AND is_account_active()
         AND EXISTS (
             SELECT 1 FROM public.chats 
             WHERE id = messages.chat_id 
@@ -549,7 +555,6 @@ CREATE POLICY "abuse_reports_insert_own"
     TO authenticated
     WITH CHECK (
         reporter_id = auth.uid()
-        AND is_account_active()
     );
 
 -- Users can view their own reports

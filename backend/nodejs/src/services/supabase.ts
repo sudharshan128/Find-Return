@@ -60,19 +60,29 @@ class SupabaseService {
   /**
    * Get admin profile from database
    * CRITICAL: Verify is_active and force_logout_at
+   * NOTE: userId is from auth.users.id, we query admin_users by user_id FK
    */
   async getAdminProfile(userId: string): Promise<AdminProfile | null> {
     try {
+      console.log(`[AUTH] Fetching admin profile for userId: ${userId}`);
+      
       const { data, error } = await this.clientService
         .from("admin_users")
         .select("*")
-        .eq("id", userId)
+        .eq("user_id", userId)
         .single();
 
-      if (error || !data) {
-        console.log("[AUTH] Admin not found:", userId);
+      if (error) {
+        console.log("[AUTH] Database error fetching admin:", error.message, error.code);
         return null;
       }
+
+      if (!data) {
+        console.log("[AUTH] Admin record not found for userId:", userId);
+        return null;
+      }
+
+      console.log(`[AUTH] Admin record found: ${data.email}, is_active: ${data.is_active}`);
 
       // Check if admin is inactive
       if (!data.is_active) {
@@ -89,6 +99,7 @@ class SupabaseService {
         }
       }
 
+      console.log(`[AUTH] Admin profile verified successfully: ${data.email}`);
       return data as AdminProfile;
     } catch (error) {
       console.error("[AUTH] Error fetching admin profile:", error);
@@ -108,16 +119,20 @@ class SupabaseService {
     details: Record<string, any>,
     ipAddress: string,
     userAgent: string,
-    resourceId?: string
+    resourceId?: string,
+    adminEmail?: string
   ): Promise<void> {
     try {
+      // Map to actual database schema columns
       await this.clientService.from("admin_audit_logs").insert({
         admin_id: adminId,
         action,
         resource_type: resourceType,
-        resource_id: resourceId,
-        status,
-        details,
+        resource_action: status, // Map status to resource_action
+        resource_id: resourceId || null,
+        reason: adminEmail || null, // Store admin email in reason field temporarily
+        before_data: details || null, // Store details in before_data
+        after_data: null,
         ip_address: ipAddress,
         user_agent: userAgent,
         created_at: new Date().toISOString(),
@@ -133,15 +148,18 @@ class SupabaseService {
    */
   async logAdminLogin(
     adminId: string,
+    adminEmail: string,
     ipAddress: string,
     userAgent: string
   ): Promise<void> {
     try {
       await this.clientService.from("admin_login_history").insert({
         admin_id: adminId,
+        admin_email: adminEmail,
         login_at: new Date().toISOString(),
         ip_address: ipAddress,
         user_agent: userAgent,
+        success: true,
       });
     } catch (error) {
       console.error("[AUDIT] Error logging login:", error);
@@ -165,7 +183,7 @@ class SupabaseService {
           twofa_enabled: twoFAEnabled,
           twofa_verified_at: twoFAVerifiedAt,
         })
-        .eq("id", adminId);
+        .eq("user_id", adminId);
 
       if (error) {
         console.error("[2FA] Error updating 2FA settings:", error);
@@ -187,7 +205,7 @@ class SupabaseService {
       const { data, error } = await this.clientService
         .from("admin_users")
         .select("twofa_secret")
-        .eq("id", adminId)
+        .eq("user_id", adminId)
         .single();
 
       if (error || !data) {
@@ -203,24 +221,115 @@ class SupabaseService {
 
   /**
    * Get analytics data
-   * CRITICAL: Read-only operations
+   * CRITICAL: Calculate from actual tables (no platform_statistics_daily table)
+   * FIXED: Uses real data sources - items, claims, abuse_reports
    */
   async getAnalyticsSummary(): Promise<any> {
     try {
-      const [statsData, itemsData, claimsData, reportsData] = await Promise.all(
-        [
-          this.clientService.from("platform_statistics_daily").select("*"),
-          this.clientService.from("items").select("id"),
-          this.clientService.from("claims").select("id"),
-          this.clientService.from("reports").select("id"),
-        ]
-      );
+      console.log("[ANALYTICS] getAnalyticsSummary called");
+      // Fetch all counts in parallel
+      const totalUsersRes = await this.clientService.from("user_profiles").select("*", { count: "exact", head: true });
+      console.log("[ANALYTICS] Total Users query result:", { count: totalUsersRes.count, error: totalUsersRes.error });
+      
+      const newTodayUsersRes = await this.clientService
+        .from("user_profiles")
+        .select("*", { count: "exact", head: true })
+        .gte("created_at", new Date(new Date().setHours(0, 0, 0, 0)).toISOString());
+      
+      const lowTrustUsersRes = await this.clientService
+        .from("user_profiles")
+        .select("*", { count: "exact", head: true })
+        .lt("trust_score", 40);
+        
+      const [
+        totalItemsRes,
+        activeItemsRes,
+        returnedItemsRes,
+        flaggedItemsRes,
+        totalClaimsRes,
+        pendingClaimsRes,
+        approvedClaimsRes,
+        rejectedClaimsRes,
+        approvedTodayRes,
+        activeChatsRes,
+        frozenChatsRes,
+        pendingReportsRes,
+      ] = await Promise.all([
+        // Items
+        this.clientService.from("items").select("*", { count: "exact", head: true }),
+        this.clientService
+          .from("items")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "active"),
+        this.clientService
+          .from("items")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "returned"),
+        this.clientService
+          .from("items")
+          .select("*", { count: "exact", head: true })
+          .eq("is_flagged", true),
+        // Claims
+        this.clientService.from("claims").select("*", { count: "exact", head: true }),
+        this.clientService
+          .from("claims")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "pending"),
+        this.clientService
+          .from("claims")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "approved"),
+        this.clientService
+          .from("claims")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "rejected"),
+        this.clientService
+          .from("claims")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "approved")
+          .gte("approved_at", new Date(new Date().setHours(0, 0, 0, 0)).toISOString()),
+        // Chats
+        this.clientService
+          .from("chats")
+          .select("*", { count: "exact", head: true })
+          .eq("is_frozen", false),
+        this.clientService
+          .from("chats")
+          .select("*", { count: "exact", head: true })
+          .eq("is_frozen", true),
+        // Reports
+        this.clientService
+          .from("abuse_reports")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "pending"),
+      ]);
 
       return {
-        totalItems: itemsData.data?.length || 0,
-        totalClaims: claimsData.data?.length || 0,
-        totalReports: reportsData.data?.length || 0,
-        statistics: statsData.data || [],
+        users: {
+          total: totalUsersRes.count || 0,
+          new_today: newTodayUsersRes.count || 0,
+          low_trust: lowTrustUsersRes.count || 0,
+        },
+        items: {
+          total: totalItemsRes.count || 0,
+          active: activeItemsRes.count || 0,
+          returned: returnedItemsRes.count || 0,
+          flagged: flaggedItemsRes.count || 0,
+        },
+        claims: {
+          total: totalClaimsRes.count || 0,
+          pending: pendingClaimsRes.count || 0,
+          approved: approvedClaimsRes.count || 0,
+          rejected: rejectedClaimsRes.count || 0,
+          approved_today: approvedTodayRes.count || 0,
+        },
+        chats: {
+          active: activeChatsRes.count || 0,
+          frozen: frozenChatsRes.count || 0,
+        },
+        reports: {
+          pending: pendingReportsRes.count || 0,
+        },
       };
     } catch (error) {
       console.error("[ANALYTICS] Error fetching summary:", error);
@@ -230,54 +339,192 @@ class SupabaseService {
 
   /**
    * Get daily trend data
+   * FIXED: Calculates trends from items table (no platform_statistics_daily table)
+   * Groups items by date_found to show activity over time
    */
   async getAnalyticsTrends(days: number = 30): Promise<any> {
     try {
-      const { data, error } = await this.clientService
-        .from("platform_statistics_daily")
-        .select("*")
-        .gte("date", new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString())
-        .order("date", { ascending: true });
+      const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+      
+      // Generate all dates in range for complete data
+      const dateMap = new Map<string, {
+        stat_date: string;
+        new_users: number;
+        new_items: number;
+        new_claims: number;
+        returned_items: number;
+        new_reports: number;
+      }>();
 
-      if (error) {
-        console.error("[ANALYTICS] Error fetching trends:", error);
-        return null;
+      // Initialize all dates in range
+      for (let i = 0; i < days; i++) {
+        const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+        const dateStr = date.toISOString().split("T")[0];
+        dateMap.set(dateStr, {
+          stat_date: dateStr,
+          new_users: 0,
+          new_items: 0,
+          new_claims: 0,
+          returned_items: 0,
+          new_reports: 0,
+        });
       }
 
-      return data;
+      // Fetch items created in the time period
+      const { data: items } = await this.clientService
+        .from("items")
+        .select("id, created_at, status")
+        .gte("created_at", startDate);
+
+      // Count items per day
+      (items || []).forEach((item: any) => {
+        const date = new Date(item.created_at).toISOString().split("T")[0];
+        if (dateMap.has(date)) {
+          const current = dateMap.get(date)!;
+          current.new_items += 1;
+          if (item.status === "returned") {
+            current.returned_items += 1;
+          }
+        }
+      });
+
+      // Fetch claims in the time period
+      const { data: claims } = await this.clientService
+        .from("claims")
+        .select("id, created_at")
+        .gte("created_at", startDate);
+
+      (claims || []).forEach((claim: any) => {
+        const date = new Date(claim.created_at).toISOString().split("T")[0];
+        if (dateMap.has(date)) {
+          dateMap.get(date)!.new_claims += 1;
+        }
+      });
+
+      // Fetch new users in the time period
+      const { data: users } = await this.clientService
+        .from("user_profiles")
+        .select("user_id, created_at")
+        .gte("created_at", startDate);
+
+      (users || []).forEach((user: any) => {
+        const date = new Date(user.created_at).toISOString().split("T")[0];
+        if (dateMap.has(date)) {
+          dateMap.get(date)!.new_users += 1;
+        }
+      });
+
+      // Fetch abuse reports in the time period
+      const { data: reports } = await this.clientService
+        .from("abuse_reports")
+        .select("id, created_at")
+        .gte("created_at", startDate);
+
+      (reports || []).forEach((report: any) => {
+        const date = new Date(report.created_at).toISOString().split("T")[0];
+        if (dateMap.has(date)) {
+          dateMap.get(date)!.new_reports += 1;
+        }
+      });
+
+      // Convert to array sorted by date (most recent first)
+      return Array.from(dateMap.values())
+        .sort((a, b) => b.stat_date.localeCompare(a.stat_date));
     } catch (error) {
       console.error("[ANALYTICS] Error fetching trends:", error);
-      return null;
+      return [];
     }
   }
 
   /**
    * Get geographic data (areas with activity)
+   * Returns all items grouped by area with total and active counts
    */
   async getAnalyticsAreas(): Promise<any> {
     try {
+      // Get all items with area information
       const { data, error } = await this.clientService
         .from("items")
-        .select("area, id")
-        .eq("status", "active");
+        .select("area_id, status, areas(id, name)");
 
       if (error) {
+        console.error("[ANALYTICS] Error fetching areas:", error);
         return null;
       }
 
-      // Group by area
-      const areaMap = new Map<string, number>();
+      // Group by area and count both total and active
+      const areaMap = new Map<string, { name: string; total: number; active: number }>();
+      
       (data || []).forEach((item: any) => {
-        const area = item.area || "Unknown";
-        areaMap.set(area, (areaMap.get(area) || 0) + 1);
+        if (item.areas) {
+          const areaName = item.areas.name;
+          const key = areaName;
+          
+          if (!areaMap.has(key)) {
+            areaMap.set(key, { name: areaName, total: 0, active: 0 });
+          }
+          const current = areaMap.get(key)!;
+          current.total += 1;
+          if (item.status === "active" && !item.is_hidden) {
+            current.active += 1;
+          }
+        }
       });
 
-      return Array.from(areaMap.entries()).map(([area, count]) => ({
-        area,
-        count,
-      }));
+      return Array.from(areaMap.values()).sort((a, b) => b.total - a.total);
     } catch (error) {
       console.error("[ANALYTICS] Error fetching areas:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Get category data (categories with activity)
+   * Returns all items grouped by category with total, active, and returned counts
+   * Joins with categories table using category_id
+   */
+  async getAnalyticsCategories(): Promise<any> {
+    try {
+      // Get all items with category information via join
+      console.log("[ANALYTICS] Starting categories query...");
+      const { data, error } = await this.clientService
+        .from("items")
+        .select("status, category_id, categories(id, name)");
+
+      console.log("[ANALYTICS] Categories query result:", { count: data?.length, hasError: !!error, error });
+
+      if (error) {
+        console.error("[ANALYTICS] Error fetching categories:", error);
+        return null;
+      }
+
+      // Group by category and count by status
+      const categoryMap = new Map<string, { name: string; total: number; active: number; returned: number; icon: string }>();
+      
+      (data || []).forEach((item: any) => {
+        const categoryName = item.categories?.name || "Uncategorized";
+        
+        if (!categoryMap.has(categoryName)) {
+          categoryMap.set(categoryName, { 
+            name: categoryName, 
+            total: 0, 
+            active: 0, 
+            returned: 0,
+            icon: "📦" // Default icon
+          });
+        }
+        const current = categoryMap.get(categoryName)!;
+        current.total += 1;
+        if (item.status === "active") {
+          current.active += 1;
+        } else if (item.status === "returned") {
+          current.returned += 1;
+        }
+      });
+
+      return Array.from(categoryMap.values()).sort((a, b) => b.total - a.total);
+    } catch (error) {
+      console.error("[ANALYTICS] Error fetching categories:", error);
       return null;
     }
   }
@@ -303,7 +550,7 @@ class SupabaseService {
           twofa_enabled: false, // Not verified yet
           twofa_verified_at: null,
         })
-        .eq("id", adminId);
+        .eq("user_id", adminId);
 
       if (error) {
         console.error("[2FA] Failed to save secret:", error);
@@ -319,6 +566,7 @@ class SupabaseService {
 
   /**
    * Get 2FA status for an admin
+   * Note: adminId here is the admin_users.id (primary key), not user_id
    */
   async get2FAStatus(
     adminId: string
@@ -347,6 +595,7 @@ class SupabaseService {
   /**
    * Get encrypted 2FA secret for verification
    * CRITICAL: Decrypt only server-side
+   * Note: adminId here is admin_users.id (primary key), not user_id
    */
   async get2FASecret(adminId: string): Promise<string | null> {
     try {
@@ -378,7 +627,7 @@ class SupabaseService {
           twofa_enabled: true,
           twofa_verified_at: new Date().toISOString(),
         })
-        .eq("id", adminId);
+        .eq("user_id", adminId);
 
       if (error) {
         console.error("[2FA] Failed to enable 2FA:", error);
@@ -405,7 +654,7 @@ class SupabaseService {
           twofa_secret: null,
           twofa_backup_codes: null,
         })
-        .eq("id", adminId);
+        .eq("user_id", adminId);
 
       if (error) {
         console.error("[2FA] Failed to disable 2FA:", error);

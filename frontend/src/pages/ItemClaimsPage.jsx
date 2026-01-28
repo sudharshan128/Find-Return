@@ -15,7 +15,8 @@ import {
   Clock, 
   Star, 
   Eye,
-  AlertTriangle
+  AlertTriangle,
+  Image as ImageIcon
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -29,35 +30,58 @@ const ItemClaimsPage = () => {
   const [loading, setLoading] = useState(true);
   const [selectedClaim, setSelectedClaim] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
+    let isMounted = true;
+
     const fetchData = async () => {
       try {
+        console.log('[ITEM CLAIMS] Fetching data for item:', id);
+        setError(null);
+        
         // Fetch item
         const itemData = await db.items.get(id);
         
+        if (!isMounted) return;
+
         // Verify ownership
         if (itemData.finder_id !== user.id) {
+          console.log('[ITEM CLAIMS] Unauthorized - item not owned by user');
           toast.error('You can only view claims for your own items');
           navigate('/my-items');
           return;
         }
         
+        console.log('[ITEM CLAIMS] Item verified, fetching claims...');
         setItem(itemData);
 
         // Fetch claims
         const claimsData = await db.claims.getForItem(id);
-        setClaims(claimsData || []);
-      } catch (error) {
-        console.error('Error fetching data:', error);
-        toast.error('Failed to load claims');
-        navigate('/my-items');
+        
+        if (isMounted) {
+          setClaims(claimsData || []);
+          console.log('[ITEM CLAIMS] Claims fetched:', (claimsData || []).length);
+        }
+      } catch (err) {
+        console.error('[ITEM CLAIMS] Error fetching data:', err);
+        if (isMounted) {
+          setError(err.message || 'Failed to load claims');
+          toast.error('Failed to load claims');
+          setTimeout(() => navigate('/my-items'), 2000);
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 
     fetchData();
+
+    return () => {
+      isMounted = false;
+    };
   }, [id, user.id, navigate]);
 
   const handleUpdateStatus = async (claimId, status) => {
@@ -92,8 +116,8 @@ const ItemClaimsPage = () => {
         toast.success('Claim approved! A chat has been created with the claimant.');
         
         // Update item status
-        await db.items.update(id, { status: 'pending' });
-        setItem((prev) => ({ ...prev, status: 'pending' }));
+        await db.items.update(id, { status: 'claimed' });
+        setItem((prev) => ({ ...prev, status: 'claimed' }));
       } else {
         toast.success('Claim rejected');
       }
@@ -250,6 +274,57 @@ const ItemClaimsPage = () => {
                         </p>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Proof Description */}
+                {claim.proof_description && (
+                  <div className="mb-4">
+                    <p className="text-sm font-medium text-gray-700 mb-1">
+                      How They Lost It
+                    </p>
+                    <p className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">
+                      {claim.proof_description}
+                    </p>
+                  </div>
+                )}
+
+                {/* Description (Unique Marks) */}
+                {claim.description && !claim.answers?.unique_marks && (
+                  <div className="mb-4">
+                    <p className="text-sm font-medium text-gray-700 mb-1">
+                      Unique Identifying Marks
+                    </p>
+                    <p className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">
+                      {claim.description}
+                    </p>
+                  </div>
+                )}
+
+                {/* Proof Images */}
+                {claim.proof_images && claim.proof_images.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+                      <ImageIcon className="w-4 h-4" />
+                      Proof Images ({claim.proof_images.length})
+                    </p>
+                    <div className="flex gap-2 flex-wrap">
+                      {claim.proof_images.map((imageUrl, index) => (
+                        <a 
+                          key={index} 
+                          href={imageUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="block"
+                        >
+                          <img
+                            src={imageUrl}
+                            alt={`Proof ${index + 1}`}
+                            className="w-24 h-24 object-cover rounded-lg border-2 border-gray-200 hover:border-blue-500 transition-colors cursor-pointer"
+                          />
+                        </a>
+                      ))}
+                    </div>
                   </div>
                 )}
 

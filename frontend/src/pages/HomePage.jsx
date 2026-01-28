@@ -14,7 +14,7 @@ import { ChevronLeft, ChevronRight, Plus, Search as SearchIcon, Shield, MessageC
 const ITEMS_PER_PAGE = 12;
 
 const HomePage = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -22,8 +22,15 @@ const HomePage = () => {
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
 
-  // Fetch items - simplified and fail-safe
+  // Fetch items - wait for auth to be ready
   useEffect(() => {
+    // CRITICAL: Don't fetch until auth is initialized
+    if (authLoading) {
+      console.log('[HOME] Waiting for auth to initialize...');
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
 
     const doFetch = async () => {
@@ -31,6 +38,7 @@ const HomePage = () => {
       setError(null);
       
       try {
+        console.log('[HOME] Fetching items with filters:', filters);
         const result = await db.items.search({
           ...filters,
           offset: page * ITEMS_PER_PAGE,
@@ -38,13 +46,34 @@ const HomePage = () => {
         });
         
         if (!cancelled) {
+          console.log('[HOME] Items fetched:', result?.data?.length);
+          // Ensure images are included in the response
+          if (result?.data) {
+            console.log('[HOME] First item sample:', {
+              id: result.data[0]?.id,
+              title: result.data[0]?.title,
+              images: result.data[0]?.images,
+            });
+          }
           setItems(result?.data || []);
           setTotalCount(result?.count || 0);
+          setError(null);
         }
       } catch (err) {
-        console.error('Fetch error:', err);
+        console.error('[HOME] Fetch error:', err);
         if (!cancelled) {
-          setError(err.message?.includes('relation') ? 'database' : 'fetch');
+          const errorMsg = err.message || 'Failed to load items';
+          console.log('[HOME] Setting error:', errorMsg);
+          
+          // Distinguish between database setup issue and network issue
+          if (errorMsg.includes('relation') || errorMsg.includes('does not exist')) {
+            setError('database');
+          } else if (errorMsg.includes('Connection') || errorMsg.includes('network')) {
+            setError('network');
+          } else {
+            setError('fetch');
+          }
+          
           setItems([]);
           setTotalCount(0);
         }
@@ -57,7 +86,7 @@ const HomePage = () => {
 
     doFetch();
     return () => { cancelled = true; };
-  }, [filters, page]);
+  }, [filters, page, authLoading]);
 
   const handleFilterChange = (newFilters) => {
     setFilters(newFilters);
@@ -113,6 +142,41 @@ const HomePage = () => {
         </div>
       );
     }
+    if (type === 'database') {
+      return (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 mb-6">
+          <div className="flex items-start gap-4">
+            <AlertTriangle className="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <h3 className="font-semibold text-amber-800 mb-1">Database Setup Required</h3>
+              <p className="text-amber-700 text-sm mb-3">
+                The database tables haven't been created yet. Please run the SQL migration in Supabase SQL Editor.
+              </p>
+              <ol className="text-sm text-amber-700 list-decimal list-inside space-y-1">
+                <li>Go to your Supabase Dashboard → SQL Editor</li>
+                <li>Run <code className="bg-amber-100 px-1 rounded">supabase/schema.sql</code></li>
+                <li>Then run <code className="bg-amber-100 px-1 rounded">supabase/storage_policies.sql</code></li>
+                <li>Refresh this page</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (type === 'network') {
+      return (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-6 mb-6">
+          <div className="flex items-start gap-4">
+            <AlertTriangle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <h3 className="font-semibold text-red-800 mb-1">Network Error</h3>
+              <p className="text-red-700 text-sm mb-3">Unable to connect to the server. Please check your internet connection.</p>
+              <button onClick={handleRetry} className="btn btn-primary">Retry</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     if (type === 'fetch') {
       return (
         <div className="bg-red-50 border border-red-200 rounded-xl p-6 mb-6">
@@ -120,7 +184,7 @@ const HomePage = () => {
             <AlertTriangle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
             <div>
               <h3 className="font-semibold text-red-800 mb-1">Failed to Load Items</h3>
-              <p className="text-red-700 text-sm mb-3">Something went wrong. Please try again.</p>
+              <p className="text-red-700 text-sm mb-3">Something went wrong while loading items. Please try again.</p>
               <button onClick={handleRetry} className="btn btn-primary">Retry</button>
             </div>
           </div>
@@ -132,8 +196,20 @@ const HomePage = () => {
 
   return (
     <div>
-      {/* Hero Section */}
-      <section className="bg-gradient-to-br from-primary-600 to-primary-800 text-white py-16">
+      {/* Show loading state while auth is initializing */}
+      {authLoading && (
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading items...</p>
+          </div>
+        </div>
+      )}
+      
+      {!authLoading && (
+        <>
+          {/* Hero Section */}
+          <section className="bg-gradient-to-br from-primary-600 to-primary-800 text-white py-16">
         <div className="container mx-auto px-4">
           <div className="max-w-3xl mx-auto text-center">
             <h1 className="text-4xl md:text-5xl font-bold mb-4">
@@ -206,8 +282,8 @@ const HomePage = () => {
           {/* Database Setup Warning */}
           {error === 'database' && <DatabaseSetupBanner />}
           
-          {/* Other Errors */}
-          {(error === 'timeout' || error === 'fetch') && <ErrorBanner type={error} />}
+          {/* Network/Fetch Errors */}
+          {(error === 'timeout' || error === 'fetch' || error === 'network') && <ErrorBanner type={error} />}
           
           {/* Filters */}
           <ItemFilters
@@ -316,6 +392,8 @@ const HomePage = () => {
             Upload Found Product
           </span>
         </Link>
+      )}
+        </>
       )}
     </div>
   );

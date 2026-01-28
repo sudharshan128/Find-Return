@@ -2,9 +2,11 @@ import express, { Express, Request, Response, NextFunction } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import { generalLimiter } from "./middleware/rateLimit";
+import { checkMaintenanceMode } from "./middleware/settings.middleware";
 import authRoutes from "./routes/auth.routes";
 import adminRoutes from "./routes/admin.routes";
 import twoFARoutes from "./routes/twofa.routes";
+import chatRoutes from "./routes/chatRoutes";
 
 /**
  * EXPRESS APPLICATION SETUP
@@ -23,13 +25,23 @@ export function createApp(): Express {
 
   // CORS - Lock to frontend origin
   const allowedOrigins = [
-    process.env.FRONTEND_URL || "http://localhost:5174",
-    process.env.FRONTEND_ORIGIN || "http://localhost:5174",
+    process.env.FRONTEND_URL || "http://localhost:5173",
+    process.env.FRONTEND_ORIGIN || "http://localhost:5173",
+    "http://localhost:5174", // Support both ports during development
   ];
 
   app.use(
     cors({
-      origin: allowedOrigins,
+      origin: function (origin, callback) {
+        // Allow requests with no origin (same-site requests)
+        if (!origin) return callback(null, true);
+        
+        if (allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error("Not allowed by CORS"));
+        }
+      },
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization"],
@@ -73,6 +85,25 @@ export function createApp(): Express {
   });
 
   // ============================================
+  // SETTINGS ENFORCEMENT MIDDLEWARE
+  // ============================================
+  
+  // Check maintenance mode (applies to all routes except admin and health)
+  app.use(checkMaintenanceMode);
+
+  // ============================================
+  // TEST ENDPOINT (after maintenance middleware)
+  // ============================================
+  
+  // Test endpoint (will be blocked by maintenance mode)
+  app.get("/api/test", (_req: Request, res: Response) => {
+    res.json({
+      message: "Test endpoint working - maintenance mode is OFF",
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  // ============================================
   // API ROUTES
   // ============================================
 
@@ -84,6 +115,9 @@ export function createApp(): Express {
 
   // 2FA routes
   app.use("/api/admin/2fa", twoFARoutes);
+
+  // Chat routes
+  app.use("/api/chats", chatRoutes);
 
   // ============================================
   // 404 HANDLER

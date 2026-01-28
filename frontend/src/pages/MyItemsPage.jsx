@@ -349,10 +349,14 @@ const MyItemsPage = () => {
 
   useEffect(() => {
     // Wait for auth to initialize
-    if (initializing) return;
+    if (initializing) {
+      console.log('[MY ITEMS] Waiting for auth to initialize...');
+      return;
+    }
     
     // Guard: no user
     if (!user?.id) {
+      console.log('[MY ITEMS] No user, setting loading to false');
       setLoading(false);
       return;
     }
@@ -361,6 +365,7 @@ const MyItemsPage = () => {
 
     const fetchItems = async () => {
       try {
+        console.log('[MY ITEMS] Fetching items for user:', user.id);
         setLoading(true);
         setError(null);
         
@@ -368,6 +373,7 @@ const MyItemsPage = () => {
         
         if (!isMounted) return;
         
+        console.log('[MY ITEMS] Items fetched:', (data || []).length);
         // Sort: pending claims first, then active, then closed
         const sorted = (data || []).sort((a, b) => {
           if ((a.claim_count || 0) > 0 && (b.claim_count || 0) === 0) return -1;
@@ -382,7 +388,7 @@ const MyItemsPage = () => {
         });
         setItems(sorted);
       } catch (error) {
-        console.error('Error fetching items:', error);
+        console.error('[MY ITEMS] Error fetching items:', error);
         if (isMounted) {
           setError(error.message || 'Failed to load items');
           toast.error('Failed to load items');

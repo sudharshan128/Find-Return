@@ -19,11 +19,13 @@ import UploadItemPage from './pages/UploadItemPage';
 import MyClaimsPage from './pages/MyClaimsPage';
 import MyItemsPage from './pages/MyItemsPage';
 import ItemClaimsPage from './pages/ItemClaimsPage';
-import ChatsPage from './pages/ChatsPage';
-import ChatPage from './pages/ChatPage';
+import ChatsListPage from './pages/ChatsListPage';
+import ChatPage from './pages/ChatPageNew';
+import BlockedUsersPage from './pages/BlockedUsersPage';
 import ProfilePage from './pages/ProfilePage';
 import SettingsPage from './pages/SettingsPage';
 import AuthCallback from './pages/AuthCallback';
+import ImageUploadTestPage from './pages/ImageUploadTestPage';
 
 // Admin App - uses its own routing
 import AdminApp from './admin/AdminApp';
@@ -85,7 +87,7 @@ function App() {
               path="/chats"
               element={
                 <ProtectedRoute>
-                  <ChatsPage />
+                  <ChatsListPage />
                 </ProtectedRoute>
               }
             />
@@ -94,6 +96,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <ChatPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/blocked-users"
+              element={
+                <ProtectedRoute>
+                  <BlockedUsersPage />
                 </ProtectedRoute>
               }
             />
@@ -110,6 +120,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <SettingsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/test-image-upload"
+              element={
+                <ProtectedRoute>
+                  <ImageUploadTestPage />
                 </ProtectedRoute>
               }
             />

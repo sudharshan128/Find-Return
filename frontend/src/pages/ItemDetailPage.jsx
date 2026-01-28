@@ -28,10 +28,11 @@ import { ReportAbuseModal } from '../components/common';
 const ItemDetailPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user, profile, isAuthenticated } = useAuth();
+  const { user, profile, isAuthenticated, loading: authLoading } = useAuth();
   
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [showClaimForm, setShowClaimForm] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -39,35 +40,73 @@ const ItemDetailPage = () => {
   const [existingClaim, setExistingClaim] = useState(null);
 
   useEffect(() => {
+    // Fetch item (doesn't require auth, but wait for it to be ready)
+    if (authLoading) {
+      console.log('[ITEM DETAIL] Waiting for auth to initialize...');
+      return;
+    }
+
+    let isMounted = true;
+
     const fetchItem = async () => {
       try {
-        const data = await db.items.get(id);
-        setItem(data);
-        
-        // Increment view count
-        db.items.incrementView(id);
+        console.log('[ITEM DETAIL] Fetching item:', id);
+        console.log('[ITEM DETAIL] User authenticated:', !!user?.id, 'User ID:', user?.id);
+        setLoading(true);
+        setError(null);
 
-        // Check user's existing claims
-        if (user) {
-          const count = await db.claims.getUserClaimCount(id, user.id);
-          setUserClaimCount(count);
-          
-          // Get user's existing claim if any
-          const claims = await db.claims.getForItem(id);
-          const userClaim = claims?.find(c => c.claimant_id === user.id);
-          setExistingClaim(userClaim);
+        const data = await db.items.get(id);
+        
+        if (!isMounted) return;
+
+        setItem(data);
+        console.log('[ITEM DETAIL] Item fetched successfully:', data?.id, data?.title);
+        
+        // Increment view count (non-critical)
+        db.items.incrementView(id).catch(e => console.warn('[ITEM DETAIL] View increment failed:', e));
+
+        // Check user's existing claims if authenticated
+        if (user?.id) {
+          try {
+            const count = await db.claims.getUserClaimCount(id, user.id);
+            if (isMounted) setUserClaimCount(count);
+            
+            // Get user's existing claim if any
+            const claims = await db.claims.getForItem(id);
+            const userClaim = claims?.find(c => c.claimant_id === user.id);
+            if (isMounted) setExistingClaim(userClaim);
+          } catch (claimError) {
+            console.warn('[ITEM DETAIL] Could not fetch claims:', claimError);
+          }
         }
-      } catch (error) {
-        console.error('Error fetching item:', error);
-        toast.error('Item not found');
-        navigate('/');
+      } catch (err) {
+        console.error('[ITEM DETAIL] Error fetching item:', err);
+        console.error('[ITEM DETAIL] Error details:', {
+          message: err.message,
+          status: err.status,
+          statusText: err.statusText,
+          code: err.code,
+          hint: err.hint,
+          details: err.details
+        });
+        if (isMounted) {
+          setError(err.message || 'Item not found');
+          toast.error(`Item not found: ${err.message || 'Unknown error'}`);
+          setTimeout(() => navigate('/'), 2000);
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 
     fetchItem();
-  }, [id, user, navigate]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [id, user?.id, authLoading, navigate]);
 
   if (loading) {
     return (

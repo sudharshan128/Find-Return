@@ -1,9 +1,29 @@
 import { Router, Request, Response } from "express";
 import { requireAuth, requireAdmin } from "../middleware/requireAuth";
-import { authLimiter } from "../middleware/rateLimit";
+import { adminVerifyLimiter } from "../middleware/rateLimit";
 import { supabase } from "../services/supabase";
 
 const router = Router();
+
+/**
+ * GET /admin/auth/health
+ * Health check endpoint - no auth required
+ */
+router.get("/health", (_req: Request, res: Response) => {
+  res.json({ status: "ok", message: "Admin auth backend is running" });
+});
+
+/**
+ * GET /admin/auth/debug
+ * Debug endpoint - check if middleware is the issue
+ */
+router.get("/debug", requireAuth, requireAdmin, (_req: Request, res: Response) => {
+  res.json({ 
+    status: "ok", 
+    message: "Auth middleware working",
+    timestamp: new Date().toISOString()
+  });
+});
 
 /**
  * POST /admin/auth/verify
@@ -12,7 +32,7 @@ const router = Router();
  */
 router.post(
   "/verify",
-  authLimiter,
+  adminVerifyLimiter,
   requireAuth,
   requireAdmin,
   async (req: Request, res: Response) => {
@@ -22,6 +42,7 @@ router.post(
       // Log the login
       await supabase.logAdminLogin(
         adminProfile.id,
+        adminProfile.email,
         req.clientIp!,
         req.userAgent!
       );
@@ -46,6 +67,7 @@ router.post(
           id: adminProfile.id,
           email: adminProfile.email,
           role: adminProfile.role,
+          is_active: adminProfile.is_active,
         },
         requiresTwoFA,
       });

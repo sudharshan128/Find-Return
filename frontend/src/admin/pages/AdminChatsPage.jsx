@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAdminAuth } from '../contexts/AdminAuthContext';
-import { adminChats } from '../lib/adminSupabase';
+import { adminAPIClient } from '../lib/apiClient';
 import {
   MessageSquare,
   Eye,
@@ -26,10 +26,11 @@ import {
 import toast from 'react-hot-toast';
 
 const AdminChatsPage = () => {
-  const { adminProfile, isSuperAdmin, isModerator } = useAdminAuth();
+  const { adminProfile, isSuperAdmin, isModerator, loading: authLoading } = useAdminAuth();
   
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0 });
   const [frozenOnly, setFrozenOnly] = useState(false);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
@@ -46,27 +47,43 @@ const AdminChatsPage = () => {
   const [pendingChatView, setPendingChatView] = useState(null);
 
   const fetchChats = useCallback(async () => {
+    // Guard: only fetch if auth is ready
+    if (authLoading || !adminProfile?.id) {
+      console.log('[ADMIN CHATS] Auth not ready, skipping fetch');
+      setLoading(false);
+      return;
+    }
+
     try {
+      console.log('[ADMIN CHATS] Fetching chats...');
       setLoading(true);
-      const result = await adminChats.getAll({
+      setError(null);
+
+      const result = await adminAPIClient.chats.getAll({
         page: pagination.page,
         limit: pagination.limit,
         frozen: frozenOnly || undefined,
         flagged: flaggedOnly || undefined,
       });
-      setChats(result.data);
+      setChats(result.data || []);
       setPagination(prev => ({ ...prev, total: result.total }));
+      console.log('[ADMIN CHATS] Chats fetched:', (result.data || []).length);
     } catch (error) {
-      console.error('Error fetching chats:', error);
+      console.error('[ADMIN CHATS] Error fetching chats:', error);
+      setError(error.message || 'Failed to load chats');
       toast.error('Failed to load chats');
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.limit, frozenOnly, flaggedOnly]);
+  }, [pagination.page, pagination.limit, frozenOnly, flaggedOnly, authLoading, adminProfile?.id]);
 
   useEffect(() => {
-    fetchChats();
-  }, [fetchChats]);
+    if (!authLoading && adminProfile?.id) {
+      fetchChats();
+    } else if (authLoading) {
+      console.log('[ADMIN CHATS] Waiting for auth to load...');
+    }
+  }, [fetchChats, authLoading, adminProfile?.id]);
 
   const requestChatView = (chat) => {
     setPendingChatView(chat);
@@ -76,10 +93,10 @@ const AdminChatsPage = () => {
   const handleJustificationSubmit = async (justification) => {
     try {
       // Log access with justification
-      await adminChats.logAccess(pendingChatView.id, adminProfile.id, justification);
+      await adminAPIClient.chats.logAccess(pendingChatView.id, justification);
       
       // Fetch full chat with messages
-      const fullChat = await adminChats.getById(pendingChatView.id);
+      const fullChat = await adminAPIClient.chats.get(pendingChatView.id);
       setSelectedChat(fullChat);
       setShowJustificationModal(false);
       setShowViewModal(true);
@@ -102,11 +119,11 @@ const AdminChatsPage = () => {
 
       switch (actionType) {
         case 'freeze':
-          await adminChats.freezeChat(selectedChat.id, adminProfile.id, reason);
+          await adminAPIClient.chats.freeze(selectedChat.id, reason);
           toast.success('Chat frozen successfully');
           break;
         case 'unfreeze':
-          await adminChats.unfreezeChat(selectedChat.id, adminProfile.id, reason);
+          await adminAPIClient.chats.unfreeze(selectedChat.id, reason);
           toast.success('Chat unfrozen successfully');
           break;
         case 'delete_message':
@@ -476,7 +493,7 @@ const ChatViewModal = ({ chat, adminProfile, isSuperAdmin, onClose, onRefresh })
   const handleDeleteMessage = async (messageId, reason) => {
     try {
       setDeleteLoading(messageId);
-      await adminChats.deleteMessage(messageId, adminProfile.id, reason);
+      await adminAPIClient.chats.deleteMessage(chat.id, messageId, reason);
       setMessages(messages.filter(m => m.id !== messageId));
       toast.success('Message deleted');
     } catch (error) {
