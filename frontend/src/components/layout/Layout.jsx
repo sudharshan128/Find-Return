@@ -5,8 +5,11 @@
 
 import { Outlet } from 'react-router-dom';
 import Navbar from './Navbar';
+import { useSettings } from '../../hooks/useSettings';
 
 const Layout = () => {
+  const { platform_name } = useSettings();
+  
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       <Navbar />
@@ -19,7 +22,7 @@ const Layout = () => {
         <div className="container mx-auto px-4">
           <div className="grid md:grid-cols-4 gap-8">
             <div>
-              <h3 className="font-bold text-lg text-gray-900 mb-4">Lost & Found Bangalore</h3>
+              <h3 className="font-bold text-lg text-gray-900 mb-4">{platform_name}</h3>
               <p className="text-sm text-gray-600">
                 A community-driven platform to help reunite lost items with their rightful owners.
               </p>
@@ -53,7 +56,7 @@ const Layout = () => {
           </div>
           
           <div className="border-t border-gray-200 mt-8 pt-8 text-center text-sm text-gray-500">
-            <p>&copy; {new Date().getFullYear()} Lost & Found Bangalore. All rights reserved.</p>
+            <p>&copy; {new Date().getFullYear()} {platform_name}. All rights reserved.</p>
           </div>
         </div>
       </footer>

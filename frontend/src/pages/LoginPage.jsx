@@ -76,6 +76,7 @@ const StatCounter = ({ value, label }) => (
 
 const LoginPage = () => {
   const { signInWithGoogle, initializing, isAuthenticated } = useAuth();
+  const { platform_name, contact_email } = useSettings();
   const navigate = useNavigate();
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [error, setError] = useState(null);
@@ -148,7 +149,7 @@ const LoginPage = () => {
                 </div>
                 <div>
                   <h1 className="text-3xl font-bold text-gray-900">
-                    Lost & Found
+                    {platform_name}
                   </h1>
                   <p className="text-primary-600 font-semibold">Bangalore</p>
                 </div>
@@ -197,7 +198,7 @@ const LoginPage = () => {
                   <MapPin className="w-6 h-6 text-white" />
                 </div>
                 <div className="text-left">
-                  <h1 className="text-2xl font-bold text-gray-900">Lost & Found</h1>
+                  <h1 className="text-2xl font-bold text-gray-900">{platform_name}</h1>
                   <p className="text-primary-600 font-medium text-sm">Bangalore</p>
                 </div>
               </div>
@@ -310,7 +311,7 @@ const LoginPage = () => {
             <p className="mt-6 text-center text-sm text-gray-500">
               Having trouble?{' '}
               <a 
-                href="mailto:support@lostfound.bangalore" 
+                href={`mailto:${contact_email}`} 
                 className="text-primary-600 hover:text-primary-700 font-medium"
               >
                 Contact Support

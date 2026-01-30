@@ -52,6 +52,22 @@ export const AuthProvider = ({ children }) => {
           // Get the user object from auth
           const user = await auth.getUser();
           if (user) {
+            // Fetch default trust score from settings
+            let defaultTrustScore = 50; // Fallback default
+            try {
+              const { data: settingsData } = await supabase
+                .from('system_settings')
+                .select('setting_value')
+                .eq('setting_key', 'default_trust_score')
+                .single();
+              if (settingsData?.setting_value) {
+                defaultTrustScore = settingsData.setting_value;
+                console.log('[AUTH] Using default_trust_score from settings:', defaultTrustScore);
+              }
+            } catch (settingsErr) {
+              console.warn('[AUTH] Could not fetch default_trust_score, using fallback:', defaultTrustScore);
+            }
+
             // Create profile automatically
             const { data: newProfile, error: createError } = await supabase
               .from('user_profiles')
@@ -62,7 +78,7 @@ export const AuthProvider = ({ children }) => {
                 avatar_url: user.user_metadata?.avatar_url || null,
                 role: 'user',
                 account_status: 'active',
-                trust_score: 100,
+                trust_score: defaultTrustScore,
               })
               .select()
               .single();
@@ -219,6 +235,23 @@ export const AuthProvider = ({ children }) => {
   const signInWithGoogle = async () => {
     setLoading(true);
     try {
+      // Check if registration is enabled
+      try {
+        const { data: regSetting } = await supabase
+          .from('system_settings')
+          .select('setting_value')
+          .eq('setting_key', 'enable_registration')
+          .single();
+        
+        if (regSetting?.setting_value === false) {
+          toast.error('Registration is currently disabled. Please contact support.');
+          setLoading(false);
+          return { error: new Error('Registration disabled') };
+        }
+      } catch (regErr) {
+        console.warn('[AUTH] Could not check registration setting, proceeding...');;
+      }
+
       await auth.signInWithGoogle();
     } catch (error) {
       console.error('Sign in error:', error);

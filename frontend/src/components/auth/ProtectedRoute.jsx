@@ -5,9 +5,11 @@
 
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSettings } from '../../hooks/useSettings';
 
 export const ProtectedRoute = ({ children, requireAdmin = false }) => {
   const { isAuthenticated, isAdmin, isBanned, initializing } = useAuth();
+  const { contact_email } = useSettings();
   const location = useLocation();
 
   // Show loading while checking auth
@@ -42,7 +44,7 @@ export const ProtectedRoute = ({ children, requireAdmin = false }) => {
             Your account has been suspended due to policy violations. 
             Please contact support if you believe this is an error.
           </p>
-          <a href="mailto:support@lostfound.com" className="btn btn-primary">
+          <a href={`mailto:${contact_email}`} className="btn btn-primary">
             Contact Support
           </a>
         </div>

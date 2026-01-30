@@ -225,6 +225,40 @@ export const db = {
       console.log('[db.items.create] Item payload:', JSON.stringify(itemPayload, null, 2));
       console.log('[db.items.create] Images to save:', images?.length || 0);
       
+      // Check max_items_per_user limit
+      try {
+        const { data: maxItemsSetting } = await supabase
+          .from('system_settings')
+          .select('setting_value')
+          .eq('setting_key', 'max_items_per_user')
+          .single();
+        
+        if (maxItemsSetting?.setting_value) {
+          const maxItems = maxItemsSetting.setting_value;
+          console.log('[db.items.create] Max items per user:', maxItems);
+          
+          // Count user's active items
+          const { count: userItemCount } = await supabase
+            .from('items')
+            .select('*', { count: 'exact', head: true })
+            .eq('finder_id', itemPayload.finder_id)
+            .in('status', ['active', 'claimed']); // Count active and claimed items
+          
+          console.log('[db.items.create] User current item count:', userItemCount);
+          
+          if (userItemCount >= maxItems) {
+            const error = new Error(`You have reached the maximum limit of ${maxItems} active items. Please delete or return some items before posting new ones.`);
+            error.code = 'MAX_ITEMS_EXCEEDED';
+            throw error;
+          }
+        }
+      } catch (limitErr) {
+        if (limitErr.code === 'MAX_ITEMS_EXCEEDED') {
+          throw limitErr; // Re-throw limit error
+        }
+        console.warn('[db.items.create] Could not check item limit:', limitErr);
+      }
+      
       // Insert item 
       console.log('[db.items.create] Inserting item into database...');
       const { data, error } = await supabase

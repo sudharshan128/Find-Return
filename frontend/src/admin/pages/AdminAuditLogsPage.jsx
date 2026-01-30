@@ -41,6 +41,7 @@ const AdminAuditLogsPage = () => {
   const [adminFilter, setAdminFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [importantOnly, setImportantOnly] = useState(true); // Default to important only
 
   // Modal states
   const [selectedLog, setSelectedLog] = useState(null);
@@ -69,10 +70,11 @@ const AdminAuditLogsPage = () => {
         adminId: adminFilter || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
+        importantOnly: importantOnly,
       });
-      setLogs(result.data || []);
+      setLogs(result.logs || []);
       setPagination(prev => ({ ...prev, total: result.total }));
-      console.log('[AUDIT LOGS] Logs fetched:', (result.data || []).length);
+      console.log('[AUDIT LOGS] Logs fetched:', (result.logs || []).length);
     } catch (error) {
       console.error('[AUDIT LOGS] Error fetching audit logs:', error);
       setError(error.message || 'Failed to load audit logs');
@@ -80,7 +82,7 @@ const AdminAuditLogsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.limit, search, actionFilter, adminFilter, dateFrom, dateTo, authLoading]);
+  }, [pagination.page, pagination.limit, search, actionFilter, adminFilter, dateFrom, dateTo, importantOnly, authLoading]);
 
   const fetchAdmins = async () => {
     try {
@@ -120,8 +122,8 @@ const AdminAuditLogsPage = () => {
 
   const handleSearch = (e) => {
     e.preventDefault();
+    // Reset to page 1 when applying filters - this will trigger fetchLogs via useEffect
     setPagination(prev => ({ ...prev, page: 1 }));
-    fetchLogs();
   };
 
   const handleExport = async () => {
@@ -337,6 +339,21 @@ const AdminAuditLogsPage = () => {
                 />
               </div>
             </div>
+
+            <div className="flex items-center">
+              <label className="flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={importantOnly}
+                  onChange={(e) => setImportantOnly(e.target.checked)}
+                  className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                />
+                <span className="ml-2 text-sm text-gray-700">
+                  Show important actions only
+                  <span className="block text-xs text-gray-500">Hides read/view actions</span>
+                </span>
+              </label>
+            </div>
           </div>
 
           <div className="flex justify-end">
@@ -370,7 +387,8 @@ const AdminAuditLogsPage = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Admin</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Target</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Details</th>
                   </tr>
@@ -389,18 +407,11 @@ const AdminAuditLogsPage = () => {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center">
-                            {log.admin_users?.avatar_url ? (
-                              <img src={log.admin_users.avatar_url} alt="" className="h-8 w-8 rounded-full" />
-                            ) : (
-                              <User className="h-4 w-4 text-indigo-600" />
-                            )}
+                            <User className="h-4 w-4 text-indigo-600" />
                           </div>
                           <div className="ml-3">
                             <div className="text-sm font-medium text-gray-900">
-                              {log.admin_users?.full_name || log.admin_email || log.admin_id?.slice(0, 8) || 'Unknown'}
-                            </div>
-                            <div className="text-xs text-gray-500 capitalize">
-                              {log.admin_users?.role || 'admin'}
+                              {log.reason || log.admin_id?.slice(0, 8) || 'System'}
                             </div>
                           </div>
                         </div>
@@ -411,10 +422,28 @@ const AdminAuditLogsPage = () => {
                           <span className="ml-1">{log.action.replace(/_/g, ' ')}</span>
                         </span>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900 max-w-[150px] truncate">
-                          {log.target_type}: {log.target_id?.slice(0, 8)}...
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          <span className="font-medium">{log.resource_type}</span>
+                          {log.resource_id && (
+                            <div className="text-xs text-gray-500 font-mono">{log.resource_id.slice(0, 8)}...</div>
+                          )}
                         </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {log.resource_action === 'success' ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                            <CheckCircle className="h-3 w-3 mr-1" />
+                            Success
+                          </span>
+                        ) : log.resource_action === 'failure' ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                            <XCircle className="h-3 w-3 mr-1" />
+                            Failure
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-500">{log.resource_action || '-'}</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
                         {log.ip_address || 'N/A'}
@@ -498,11 +527,19 @@ const AuditLogDetailModal = ({ log, onClose }) => {
             </div>
             <div>
               <p className="text-sm text-gray-500">Action</p>
-              <p className="text-sm text-gray-900">{log.action.replace(/_/g, ' ')}</p>
+              <p className="text-sm text-gray-900 font-medium">{log.action.replace(/_/g, ' ')}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Status</p>
+              <p className="text-sm text-gray-900 capitalize">{log.resource_action || 'N/A'}</p>
             </div>
             <div>
               <p className="text-sm text-gray-500">IP Address</p>
               <p className="text-sm font-mono text-gray-900">{log.ip_address || 'N/A'}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">User Agent</p>
+              <p className="text-xs text-gray-600 truncate" title={log.user_agent}>{log.user_agent || 'N/A'}</p>
             </div>
           </div>
 
@@ -511,70 +548,60 @@ const AuditLogDetailModal = ({ log, onClose }) => {
             <h3 className="text-sm font-medium text-gray-700 mb-2">Performed By</h3>
             <div className="flex items-center space-x-3">
               <div className="h-10 w-10 rounded-full bg-indigo-200 flex items-center justify-center">
-                {log.admin_users?.avatar_url ? (
-                  <img src={log.admin_users.avatar_url} alt="" className="h-10 w-10 rounded-full" />
-                ) : (
-                  <User className="h-5 w-5 text-indigo-600" />
-                )}
+                <User className="h-5 w-5 text-indigo-600" />
               </div>
               <div>
-                <p className="text-sm font-medium text-gray-900">{log.admin_users?.full_name || log.admin_email || log.admin_id?.slice(0, 8) || 'Unknown'}</p>
-                <p className="text-xs text-gray-500 capitalize">{log.admin_users?.role || 'admin'} • {log.admin_users?.email || log.admin_id}</p>
+                <p className="text-sm font-medium text-gray-900">{log.reason || 'System Admin'}</p>
+                <p className="text-xs text-gray-500 font-mono">{log.admin_id}</p>
               </div>
             </div>
           </div>
 
-          {/* Target Info */}
+          {/* Resource Info */}
           <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-            <h3 className="text-sm font-medium text-gray-700 mb-2">Target</h3>
-            <dl className="space-y-1">
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Resource</h3>
+            <dl className="space-y-2">
               <div className="flex justify-between">
                 <dt className="text-sm text-gray-500">Type</dt>
-                <dd className="text-sm text-gray-900 capitalize">{log.target_type}</dd>
+                <dd className="text-sm text-gray-900 font-medium capitalize">{log.resource_type}</dd>
               </div>
-              <div className="flex justify-between">
-                <dt className="text-sm text-gray-500">ID</dt>
-                <dd className="text-sm font-mono text-gray-900">{log.target_id}</dd>
-              </div>
+              {log.resource_id && (
+                <div className="flex justify-between">
+                  <dt className="text-sm text-gray-500">Resource ID</dt>
+                  <dd className="text-sm font-mono text-gray-900">{log.resource_id}</dd>
+                </div>
+              )}
             </dl>
           </div>
 
-          {/* Reason */}
-          {log.reason && (
+          {/* Before/After Data */}
+          {log.before_data && Object.keys(log.before_data).length > 0 && (
             <div className="mb-6">
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Reason</h3>
-              <p className="text-sm text-gray-600 bg-yellow-50 p-3 rounded-lg border border-yellow-200">
-                {log.reason}
-              </p>
-            </div>
-          )}
-
-          {/* Details/Metadata */}
-          {log.details && Object.keys(log.details).length > 0 && (
-            <div className="mb-6">
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Additional Details</h3>
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Details</h3>
               <pre className="text-sm text-gray-600 bg-gray-100 p-3 rounded-lg overflow-x-auto">
-                {JSON.stringify(log.details, null, 2)}
+                {JSON.stringify(log.before_data, null, 2)}
               </pre>
             </div>
           )}
 
-          {/* Checksum Info */}
+          {log.after_data && Object.keys(log.after_data).length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Changes</h3>
+              <pre className="text-sm text-gray-600 bg-gray-100 p-3 rounded-lg overflow-x-auto">
+                {JSON.stringify(log.after_data, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {/* Tamper-Proof Info */}
           <div className="p-4 bg-green-50 rounded-lg border border-green-200">
             <div className="flex items-start space-x-3">
               <Lock className="h-5 w-5 text-green-600 mt-0.5" />
               <div className="flex-1">
-                <h3 className="text-sm font-medium text-green-800">Integrity Verification</h3>
-                <div className="mt-2 space-y-1">
-                  <div>
-                    <p className="text-xs text-gray-500">Entry Checksum</p>
-                    <p className="text-xs font-mono text-gray-700 break-all">{log.checksum || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Previous Entry Checksum</p>
-                    <p className="text-xs font-mono text-gray-700 break-all">{log.previous_checksum || 'First entry'}</p>
-                  </div>
-                </div>
+                <h3 className="text-sm font-medium text-green-800">Tamper-Proof Audit Trail</h3>
+                <p className="text-xs text-green-700 mt-1">
+                  This entry is cryptographically checksummed and cannot be modified or deleted.
+                </p>
               </div>
             </div>
           </div>

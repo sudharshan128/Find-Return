@@ -508,9 +508,16 @@ class AdminAPIClient {
      */
     getLogs: (filters = {}) => {
       const params = new URLSearchParams();
-      if (filters.page) params.append('page', filters.page);
+      // Convert page to offset
+      const offset = ((filters.page || 1) - 1) * (filters.limit || 50);
+      params.append('offset', offset);
       if (filters.limit) params.append('limit', filters.limit);
       if (filters.adminId) params.append('admin_id', filters.adminId);
+      if (filters.action) params.append('action', filters.action);
+      if (filters.search) params.append('search', filters.search);
+      if (filters.dateFrom) params.append('date_from', filters.dateFrom);
+      if (filters.dateTo) params.append('date_to', filters.dateTo);
+      if (filters.importantOnly !== undefined) params.append('important_only', filters.importantOnly);
 
       const query = params.toString();
       return this.request(

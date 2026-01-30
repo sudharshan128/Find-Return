@@ -3,7 +3,8 @@
  * Root component with routing setup and auth provider.
  */
 
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { ProtectedRoute, PublicOnlyRoute } from './components/auth/ProtectedRoute';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -23,6 +24,7 @@ import ChatsListPage from './pages/ChatsListPage';
 import ChatPage from './pages/ChatPageNew';
 import BlockedUsersPage from './pages/BlockedUsersPage';
 import ProfilePage from './pages/ProfilePage';
+import MaintenancePage from './pages/MaintenancePage';
 import SettingsPage from './pages/SettingsPage';
 import AuthCallback from './pages/AuthCallback';
 import ImageUploadTestPage from './pages/ImageUploadTestPage';
@@ -30,13 +32,47 @@ import ImageUploadTestPage from './pages/ImageUploadTestPage';
 // Admin App - uses its own routing
 import AdminApp from './admin/AdminApp';
 
+// Maintenance check wrapper
+function MaintenanceChecker({ children }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    // Skip check for maintenance and admin pages
+    if (location.pathname === '/maintenance' || location.pathname.startsWith('/admin')) {
+      return;
+    }
+
+    // Check maintenance status on mount
+    const checkMaintenance = async () => {
+      try {
+        const response = await fetch('http://localhost:3000/api/health');
+        if (response.status === 503) {
+          const data = await response.json();
+          if (data.maintenance) {
+            sessionStorage.setItem('maintenanceMessage', data.message || 'We are currently performing maintenance.');
+            navigate('/maintenance', { replace: true });
+          }
+        }
+      } catch (error) {
+        console.error('Maintenance check failed:', error);
+      }
+    };
+
+    checkMaintenance();
+  }, [location.pathname, navigate]);
+
+  return children;
+}
+
 function App() {
   return (
     <ErrorBoundary>
       <Router>
         <AuthProvider>
           <Toaster position="top-right" />
-          <Routes>
+          <MaintenanceChecker>
+            <Routes>
           {/* Public routes with layout */}
           <Route element={<Layout />}>
             <Route path="/" element={<HomePage />} />
@@ -150,9 +186,13 @@ function App() {
           />
           <Route path="/auth/callback" element={<AuthCallback />} />
           
+          {/* Maintenance page - no layout */}
+          <Route path="/maintenance" element={<MaintenancePage />} />
+          
           {/* Catch all */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+          </MaintenanceChecker>
       </AuthProvider>
     </Router>
   </ErrorBoundary>

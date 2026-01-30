@@ -272,7 +272,7 @@ const AdminLayout = () => {
         {/* Footer */}
         <footer className="bg-white border-t py-4 px-6">
           <div className="flex items-center justify-between text-sm text-gray-500">
-            <p>Lost & Found Bangalore - Admin Panel v1.0</p>
+            <p>{platform_name} - Admin Panel v1.0</p>
             <p>
               Logged in as <span className="font-medium">{adminProfile?.email}</span>
             </p>

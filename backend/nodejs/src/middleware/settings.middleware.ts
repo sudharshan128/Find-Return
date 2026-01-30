@@ -78,8 +78,8 @@ export async function checkMaintenanceMode(
       return next();
     }
 
-    // Skip for health check endpoint
-    if (req.path === '/api/health') {
+    // Skip for base health check endpoint only (not /api/health)
+    if (req.path === '/health') {
       return next();
     }
 

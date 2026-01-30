@@ -236,6 +236,11 @@ router.get(
       const limit = Math.min(parseInt(req.query.limit as string) || 100, 1000);
       const offset = parseInt(req.query.offset as string) || 0;
       const filterAdminId = req.query.admin_id as string;
+      const filterAction = req.query.action as string;
+      const filterSearch = req.query.search as string;
+      const dateFrom = req.query.date_from as string;
+      const dateTo = req.query.date_to as string;
+      const importantOnly = req.query.important_only === 'true';
 
       // Log the action
       await supabase.logAdminAction(
@@ -243,7 +248,7 @@ router.get(
         "READ_AUDIT_LOGS",
         "audit",
         "success",
-        { limit, offset, filter: filterAdminId || "none" },
+        { limit, offset, filters: { admin: filterAdminId, action: filterAction, search: filterSearch, importantOnly } },
         req.clientIp!,
         req.userAgent!,
         undefined,
@@ -255,8 +260,26 @@ router.get(
         .from("admin_audit_logs")
         .select("*", { count: "exact" });
 
+      // Apply filters
       if (filterAdminId) {
         query = query.eq("admin_id", filterAdminId);
+      }
+      if (filterAction) {
+        query = query.ilike("action", `%${filterAction}%`);
+      }
+      if (filterSearch) {
+        query = query.or(`action.ilike.%${filterSearch}%,resource_type.ilike.%${filterSearch}%,reason.ilike.%${filterSearch}%`);
+      }
+      if (dateFrom) {
+        query = query.gte("created_at", dateFrom);
+      }
+      if (dateTo) {
+        query = query.lte("created_at", dateTo);
+      }
+      
+      // Filter out verbose actions if importantOnly is enabled
+      if (importantOnly) {
+        query = query.not("action", "in", "(READ_SETTINGS,READ_AUDIT_LOGS,VIEW_PROFILE,READ_DASHBOARD)");
       }
 
       const { data, count, error } = await query

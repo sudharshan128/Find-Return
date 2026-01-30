@@ -75,7 +75,7 @@ export function createApp(): Express {
   });
 
   // ============================================
-  // HEALTH CHECK
+  // HEALTH CHECK (before maintenance middleware - always available)
   // ============================================
   app.get("/health", (_req: Request, res: Response) => {
     res.json({
@@ -90,6 +90,16 @@ export function createApp(): Express {
   
   // Check maintenance mode (applies to all routes except admin and health)
   app.use(checkMaintenanceMode);
+
+  // ============================================
+  // API HEALTH CHECK (after maintenance middleware - respects maintenance mode)
+  // ============================================
+  app.get("/api/health", (_req: Request, res: Response) => {
+    res.json({
+      status: "healthy",
+      timestamp: new Date().toISOString(),
+    });
+  });
 
   // ============================================
   // TEST ENDPOINT (after maintenance middleware)

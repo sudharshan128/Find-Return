@@ -6,12 +6,14 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useSettings } from '../hooks/useSettings';
 import { CheckCircle, XCircle, Loader2, MapPin } from 'lucide-react';
 
 const AuthCallback = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { isAuthenticated, initializing } = useAuth();
+  const { platform_name, contact_email } = useSettings();
   const [status, setStatus] = useState('processing'); // processing, success, error
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -71,7 +73,7 @@ const AuthCallback = () => {
             <div className="w-10 h-10 bg-gradient-to-br from-primary-500 to-primary-600 rounded-xl flex items-center justify-center shadow-lg">
               <MapPin className="w-5 h-5 text-white" />
             </div>
-            <span className="font-bold text-gray-900">Lost & Found</span>
+            <span className="font-bold text-gray-900">{platform_name}</span>
           </div>
 
           {/* Processing State */}
@@ -135,7 +137,7 @@ const AuthCallback = () => {
         <p className="mt-6 text-center text-sm text-gray-500">
           Having trouble?{' '}
           <a 
-            href="mailto:support@lostfound.bangalore" 
+            href={`mailto:${contact_email}`} 
             className="text-primary-600 hover:text-primary-700 font-medium"
           >
             Contact Support

@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useSettings } from '../hooks/useSettings';
 import { db, storage, supabase } from '../lib/supabase';
 import { useDropzone } from 'react-dropzone';
 import toast from 'react-hot-toast';
@@ -58,6 +59,7 @@ const ALLOWED_FILE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'
 const UploadItemPage = () => {
   const navigate = useNavigate();
   const { user, profile, isAuthenticated, authLoading } = useAuth();
+  const { contact_email } = useSettings();
   
   // Form state
   const [step, setStep] = useState(1);
@@ -1104,8 +1106,8 @@ const UploadItemPage = () => {
           {/* Help Text */}
           <p className="text-center text-sm text-gray-500 mt-6">
             Need help? Contact us at{' '}
-            <a href="mailto:support@lostandfound.bangalore" className="text-primary-600 hover:underline">
-              support@lostandfound.bangalore
+            <a href={`mailto:${contact_email}`} className="text-primary-600 hover:underline">
+              {contact_email}
             </a>
           </p>
         </div>

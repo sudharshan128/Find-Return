@@ -60,7 +60,7 @@ const AdminLoginPage = () => {
             <Shield className="h-10 w-10 text-white" />
           </div>
           <h1 className="text-3xl font-bold text-white">Admin Panel</h1>
-          <p className="text-gray-400 mt-2">Lost & Found Bangalore</p>
+          <p className="text-gray-400 mt-2">{platform_name}</p>
         </div>
 
         {/* Login card */}
