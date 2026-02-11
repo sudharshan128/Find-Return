@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useAdminAuth } from '../contexts/AdminAuthContext';
+import { useSettings } from '../../hooks/useSettings';
 import {
   LayoutDashboard,
   Users,
@@ -26,6 +27,7 @@ import {
 
 const AdminLayout = () => {
   const { adminProfile, signOut, isSuperAdmin, isModerator } = useAdminAuth();
+  const { platform_name } = useSettings();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);

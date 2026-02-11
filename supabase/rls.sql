@@ -337,7 +337,6 @@ CREATE POLICY "claims_insert_own"
         )
     );
 
--- Finders can approve/reject claims on their items
 CREATE POLICY "claims_update_finder"
     ON public.claims FOR UPDATE
     TO authenticated
@@ -370,7 +369,6 @@ CREATE POLICY "claims_update_claimant"
 -- Moderators can manage all claims
 CREATE POLICY "claims_moderator_all"
     ON public.claims FOR ALL
-    TO authenticated
     USING (is_moderator_or_admin())
     WITH CHECK (is_moderator_or_admin());
 
@@ -400,7 +398,6 @@ CREATE POLICY "claim_answers_select_finder"
 -- Claimants can view their own answers
 CREATE POLICY "claim_answers_select_claimant"
     ON public.claim_verification_answers FOR SELECT
-    TO authenticated
     USING (
         EXISTS (
             SELECT 1 FROM public.claims 

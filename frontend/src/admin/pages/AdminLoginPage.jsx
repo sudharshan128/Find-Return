@@ -6,10 +6,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAdminAuth } from '../contexts/AdminAuthContext';
+import { useSettings } from '../../hooks/useSettings';
 import { Shield, Lock, AlertCircle } from 'lucide-react';
 
 const AdminLoginPage = () => {
   const { signInWithGoogle, isAuthenticated, loading, initializing, requires2FA } = useAdminAuth();
+  const { platform_name } = useSettings();
   const navigate = useNavigate();
   const [error, setError] = useState(null);
   const [isSigningIn, setIsSigningIn] = useState(false);

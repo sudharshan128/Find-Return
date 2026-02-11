@@ -1,0 +1,75 @@
+# Render Blueprint for Trust-Based Lost & Found Platform
+# This file automates the deployment of both frontend and backend services
+
+services:
+  # Backend Node.js API
+  - type: web
+    name: trust-backend-api
+    env: node
+    region: singapore  # Change to your preferred region
+    plan: starter  # Change to free/starter/standard as needed
+    buildCommand: cd backend/nodejs && npm install && npm run build
+    startCommand: cd backend/nodejs && node dist/server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: SUPABASE_URL
+        sync: false  # Set manually in Render dashboard
+      - key: SUPABASE_ANON_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false  # CRITICAL: Set manually - never commit this!
+      - key: SUPABASE_JWT_SECRET
+        sync: false  # Set manually in Render dashboard
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: trust-frontend
+          property: url
+      - key: FRONTEND_ORIGIN
+        fromService:
+          type: web
+          name: trust-frontend
+          property: url
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "900000"
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: "100"
+      - key: ADMIN_RATE_LIMIT_MAX_REQUESTS
+        value: "50"
+      - key: TOTP_WINDOW
+        value: "2"
+
+  # Frontend React/Vite App
+  - type: web
+    name: trust-frontend
+    env: static
+    region: singapore  # Change to your preferred region
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_SUPABASE_URL
+        sync: false  # Set manually in Render dashboard
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: trust-backend-api
+          property: url
+
+# Database (if using Render PostgreSQL instead of Supabase)
+# Uncomment if you want to migrate from Supabase to Render PostgreSQL
+# databases:
+#   - name: trust-db
+#     databaseName: trust_lost_found
+#     user: trust_user
+#     region: singapore
+#     plan: starter  # Change as needed
