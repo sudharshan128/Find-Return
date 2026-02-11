@@ -6,8 +6,6 @@ import { createApp } from "./app";
  * Handles startup and graceful shutdown
  */
 
-const PORT = process.env.PORT || 3000;
-
 // Validate required environment variables
 const requiredEnvVars = [
   "SUPABASE_URL",
@@ -26,10 +24,10 @@ if (missingEnvVars.length > 0) {
 // Create Express app
 const app = createApp();
 
-// Start server
-const server = app.listen(PORT, () => {
+// Start server - Render automatically provides PORT
+const server = app.listen(process.env.PORT, () => {
   console.log(
-    `[SERVER] Running on port ${PORT} in ${process.env.NODE_ENV || "development"} mode`
+    `[SERVER] Running on port ${process.env.PORT} in ${process.env.NODE_ENV || "development"} mode`
   );
   console.log(`[SERVER] Frontend origin: ${process.env.FRONTEND_URL}`);
 });
