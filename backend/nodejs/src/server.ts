@@ -6,7 +6,7 @@ import { createApp } from "./app";
  * Handles startup and graceful shutdown
  */
 
-const PORT = parseInt(process.env.PORT || "3000", 10);
+const PORT = process.env.PORT || 3000;
 
 // Validate required environment variables
 const requiredEnvVars = [
