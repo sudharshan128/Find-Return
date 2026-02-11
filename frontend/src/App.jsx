@@ -46,7 +46,8 @@ function MaintenanceChecker({ children }) {
     // Check maintenance status on mount
     const checkMaintenance = async () => {
       try {
-        const response = await fetch('http://localhost:3000/api/health');
+        const backendURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+        const response = await fetch(`${backendURL}/api/health`);
         if (response.status === 503) {
           const data = await response.json();
           if (data.maintenance) {
