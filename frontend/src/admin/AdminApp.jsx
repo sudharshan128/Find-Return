@@ -29,6 +29,7 @@ import AdminChatsPage from './pages/AdminChatsPage';
 import AdminReportsPage from './pages/AdminReportsPage';
 import AdminAuditLogsPage from './pages/AdminAuditLogsPage';
 import AdminSettingsPage from './pages/AdminSettingsPage';
+import AdminNotificationsPage from './pages/AdminNotificationsPage';
 
 // Protected Route Component
 const ProtectedRoute = ({ children, requiredRole }) => {
@@ -116,6 +117,7 @@ const AdminAppContent = () => {
           <Route path="claims" element={<AdminClaimsPage />} />
           <Route path="chats" element={<AdminChatsPage />} />
           <Route path="reports" element={<AdminReportsPage />} />
+          <Route path="notifications" element={<AdminNotificationsPage />} />
           <Route path="audit-logs" element={<AdminAuditLogsPage />} />
           <Route path="settings" element={<AdminSettingsPage />} />
         </Route>

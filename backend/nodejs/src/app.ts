@@ -7,6 +7,7 @@ import authRoutes from "./routes/auth.routes";
 import adminRoutes from "./routes/admin.routes";
 import twoFARoutes from "./routes/twofa.routes";
 import chatRoutes from "./routes/chatRoutes";
+import notificationsRoutes from "./routes/notifications.routes";
 
 /**
  * EXPRESS APPLICATION SETUP
@@ -125,6 +126,9 @@ export function createApp(): Express {
 
   // 2FA routes
   app.use("/api/admin/2fa", twoFARoutes);
+
+  // Notifications routes
+  app.use("/api/admin/notifications", notificationsRoutes);
 
   // Chat routes
   app.use("/api/chats", chatRoutes);

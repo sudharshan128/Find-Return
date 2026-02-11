@@ -3,9 +3,10 @@
  * Provides the main layout structure for the admin panel
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useAdminAuth } from '../contexts/AdminAuthContext';
+import { adminAPIClient } from '../lib/apiClient';
 import { useSettings } from '../../hooks/useSettings';
 import {
   LayoutDashboard,
@@ -31,6 +32,7 @@ const AdminLayout = () => {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const navigation = [
     {
@@ -71,6 +73,13 @@ const AdminLayout = () => {
       badge: true,
     },
     {
+      name: 'Notifications',
+      href: '/admin/notifications',
+      icon: Bell,
+      roles: ['analyst', 'moderator', 'super_admin'],
+      badgeCount: unreadCount,
+    },
+    {
       name: 'Audit Logs',
       href: '/admin/audit-logs',
       icon: History,
@@ -83,6 +92,26 @@ const AdminLayout = () => {
       roles: ['super_admin'],
     },
   ];
+
+  // Fetch unread notifications count
+  useEffect(() => {
+    const fetchUnreadCount = async () => {
+      try {
+        const data = await adminAPIClient.notifications.unreadCount();
+        setUnreadCount(data.unread_count || 0);
+      } catch (error) {
+        // Silently fail - notifications table may not exist yet
+        console.log('Notifications not available yet:', error.message);
+      }
+    };
+
+    fetchUnreadCount();
+
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchUnreadCount, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   const filteredNavigation = navigation.filter((item) =>
     item.roles.includes(adminProfile?.role)
@@ -166,6 +195,11 @@ const AdminLayout = () => {
                     !
                   </span>
                 )}
+                {item.badgeCount > 0 && (
+                  <span className="ml-auto bg-indigo-500 text-white text-xs px-2 py-0.5 rounded-full">
+                    {item.badgeCount}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -221,12 +255,17 @@ const AdminLayout = () => {
             {/* Right side */}
             <div className="flex items-center space-x-4">
               {/* Notifications */}
-              <button className="relative p-2 text-gray-500 hover:text-gray-700">
+              <Link
+                to="/admin/notifications"
+                className="relative p-2 text-gray-500 hover:text-gray-700"
+              >
                 <Bell className="h-6 w-6" />
-                <span className="absolute top-0 right-0 h-4 w-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
-                  3
-                </span>
-              </button>
+                {unreadCount > 0 && (
+                  <span className="absolute top-0 right-0 h-5 w-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-medium">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </Link>
 
               {/* Profile dropdown */}
               <div className="relative">

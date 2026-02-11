@@ -615,6 +615,67 @@ class AdminAPIClient {
     recover: (code) =>
       this.request('POST', '/api/admin/2fa/recovery', { code }),
   };
+
+  // ========================================
+  // NOTIFICATIONS ENDPOINTS
+  // ========================================
+
+  notifications = {
+    /**
+     * Get all notifications with optional filters
+     */
+    list: (params = {}) => {
+      const query = new URLSearchParams();
+      if (params.unread_only) query.append('unread_only', 'true');
+      if (params.type && params.type !== 'all') query.append('type', params.type);
+      if (params.limit) query.append('limit', String(params.limit));
+      if (params.offset) query.append('offset', String(params.offset));
+      const qs = query.toString();
+      return this.request('GET', `/api/admin/notifications${qs ? '?' + qs : ''}`);
+    },
+
+    /**
+     * Get unread notification count
+     */
+    unreadCount: () =>
+      this.request('GET', '/api/admin/notifications/unread-count'),
+
+    /**
+     * Get notification statistics
+     */
+    stats: () =>
+      this.request('GET', '/api/admin/notifications/stats/summary'),
+
+    /**
+     * Get a specific notification
+     */
+    get: (id) =>
+      this.request('GET', `/api/admin/notifications/${id}`),
+
+    /**
+     * Mark a notification as read
+     */
+    markRead: (id) =>
+      this.request('PUT', `/api/admin/notifications/${id}/read`),
+
+    /**
+     * Mark all notifications as read
+     */
+    markAllRead: () =>
+      this.request('PUT', '/api/admin/notifications/read-all'),
+
+    /**
+     * Delete a notification
+     */
+    delete: (id) =>
+      this.request('DELETE', `/api/admin/notifications/${id}`),
+
+    /**
+     * Create a test notification (super admin only)
+     */
+    createTest: (data = {}) =>
+      this.request('POST', '/api/admin/notifications/test', data),
+  };
 }
 
 // Export singleton instance
