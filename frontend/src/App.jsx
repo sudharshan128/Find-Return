@@ -28,6 +28,7 @@ import MaintenancePage from './pages/MaintenancePage';
 import SettingsPage from './pages/SettingsPage';
 import AuthCallback from './pages/AuthCallback';
 import ImageUploadTestPage from './pages/ImageUploadTestPage';
+import AboutPage from './pages/AboutPage';
 
 // Admin App - uses its own routing
 import AdminApp from './admin/AdminApp';
@@ -169,6 +170,9 @@ function App() {
               }
             />
           </Route>
+
+          {/* About page - public, with layout */}
+          <Route path="/about" element={<AboutPage />} />
 
           {/* Admin routes - NOT wrapped in layout, uses separate AdminApp */}
           <Route

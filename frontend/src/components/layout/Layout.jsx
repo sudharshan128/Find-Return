@@ -42,6 +42,7 @@ const Layout = () => {
               <ul className="space-y-2 text-sm">
                 <li><a href="/faq" className="text-gray-600 hover:text-primary-600">FAQ</a></li>
                 <li><a href="/contact" className="text-gray-600 hover:text-primary-600">Contact Us</a></li>
+                <li><a href="/about" className="text-gray-600 hover:text-primary-600">About / Developer</a></li>
                 <li><a href="/report-abuse" className="text-gray-600 hover:text-primary-600">Report Abuse</a></li>
               </ul>
             </div>
@@ -57,6 +58,13 @@ const Layout = () => {
           
           <div className="border-t border-gray-200 mt-8 pt-8 text-center text-sm text-gray-500">
             <p>&copy; {new Date().getFullYear()} {platform_name}. All rights reserved.</p>
+            <p className="mt-2">
+              Built with ❤️ by{' '}
+              <a href="/about" className="text-blue-600 hover:text-blue-700 font-medium">
+                Sudharshan S
+              </a>
+              {' '}— Founder & Developer
+            </p>
           </div>
         </div>
       </footer>
