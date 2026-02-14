@@ -105,27 +105,6 @@ const HomePage = () => {
 
   const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
 
-  // Database not ready banner
-  const DatabaseSetupBanner = () => (
-    <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 mb-6">
-      <div className="flex items-start gap-4">
-        <AlertTriangle className="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />
-        <div>
-          <h3 className="font-semibold text-amber-800 mb-1">Database Setup Required</h3>
-          <p className="text-amber-700 text-sm mb-3">
-            The database tables haven't been created yet. Please run the SQL migration in Supabase SQL Editor.
-          </p>
-          <ol className="text-sm text-amber-700 list-decimal list-inside space-y-1">
-            <li>Go to your Supabase Dashboard → SQL Editor</li>
-            <li>Copy the contents from <code className="bg-amber-100 px-1 rounded">supabase/migrations/000_fresh_setup.sql</code></li>
-            <li>Paste and click "Run"</li>
-            <li>Refresh this page</li>
-          </ol>
-        </div>
-      </div>
-    </div>
-  );
-
   // Error banner component
   const ErrorBanner = ({ type }) => {
     if (type === 'timeout') {
@@ -137,27 +116,6 @@ const HomePage = () => {
               <h3 className="font-semibold text-red-800 mb-1">Request Timeout</h3>
               <p className="text-red-700 text-sm mb-3">The request took too long. Please try again.</p>
               <button onClick={handleRetry} className="btn btn-primary">Retry</button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-    if (type === 'database') {
-      return (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 mb-6">
-          <div className="flex items-start gap-4">
-            <AlertTriangle className="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />
-            <div>
-              <h3 className="font-semibold text-amber-800 mb-1">Database Setup Required</h3>
-              <p className="text-amber-700 text-sm mb-3">
-                The database tables haven't been created yet. Please run the SQL migration in Supabase SQL Editor.
-              </p>
-              <ol className="text-sm text-amber-700 list-decimal list-inside space-y-1">
-                <li>Go to your Supabase Dashboard → SQL Editor</li>
-                <li>Run <code className="bg-amber-100 px-1 rounded">supabase/schema.sql</code></li>
-                <li>Then run <code className="bg-amber-100 px-1 rounded">supabase/storage_policies.sql</code></li>
-                <li>Refresh this page</li>
-              </ol>
             </div>
           </div>
         </div>
@@ -279,9 +237,6 @@ const HomePage = () => {
       {/* Browse Items Section */}
       <section id="browse" className="py-8">
         <div className="container mx-auto px-4">
-          {/* Database Setup Warning */}
-          {error === 'database' && <DatabaseSetupBanner />}
-          
           {/* Network/Fetch Errors */}
           {(error === 'timeout' || error === 'fetch' || error === 'network') && <ErrorBanner type={error} />}
           
