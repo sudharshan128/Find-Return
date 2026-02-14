@@ -1,5 +1,7 @@
 import "dotenv/config";
 import { createApp } from "./app";
+import cron from "node-cron";
+import { createClient } from "@supabase/supabase-js";
 
 /**
  * SERVER ENTRY POINT
@@ -30,6 +32,27 @@ const server = app.listen(process.env.PORT, () => {
     `[SERVER] Running on port ${process.env.PORT} in ${process.env.NODE_ENV || "development"} mode`
   );
   console.log(`[SERVER] Frontend origin: ${process.env.FRONTEND_URL}`);
+  
+  // Setup daily trust score maintenance (runs at midnight)
+  const supabaseAdmin = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+  
+  cron.schedule('0 0 * * *', async () => {
+    console.log('[CRON] Running daily trust score maintenance...');
+    try {
+      const { error } = await supabaseAdmin.rpc('daily_trust_maintenance');
+      if (error) {
+        console.error('[CRON] Daily maintenance error:', error);
+      } else {
+        console.log('[CRON] Daily trust maintenance completed successfully');
+      }
+    } catch (err: any) {
+      console.error('[CRON] Daily maintenance exception:', err.message);
+    }
+  });
+  console.log('[CRON] Trust score maintenance scheduled (midnight daily)');
 });
 
 // ============================================

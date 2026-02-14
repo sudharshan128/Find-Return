@@ -236,6 +236,16 @@ class SupabaseService {
         .select("*", { count: "exact", head: true })
         .gte("created_at", new Date(new Date().setHours(0, 0, 0, 0)).toISOString());
       
+      const newThisWeekUsersRes = await this.clientService
+        .from("user_profiles")
+        .select("*", { count: "exact", head: true })
+        .gte("created_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+      
+      const newThisMonthUsersRes = await this.clientService
+        .from("user_profiles")
+        .select("*", { count: "exact", head: true })
+        .gte("created_at", new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString());
+      
       const lowTrustUsersRes = await this.clientService
         .from("user_profiles")
         .select("*", { count: "exact", head: true })
@@ -308,6 +318,8 @@ class SupabaseService {
         users: {
           total: totalUsersRes.count || 0,
           new_today: newTodayUsersRes.count || 0,
+          new_this_week: newThisWeekUsersRes.count || 0,
+          new_this_month: newThisMonthUsersRes.count || 0,
           low_trust: lowTrustUsersRes.count || 0,
         },
         items: {

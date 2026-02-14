@@ -246,6 +246,37 @@ const AdminDashboardPage = () => {
         />
       </div>
 
+      {/* User Growth Overview */}
+      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl shadow-sm p-6 border border-blue-100">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 bg-blue-500 rounded-lg">
+            <Users className="h-5 w-5 text-white" />
+          </div>
+          <h2 className="text-lg font-semibold text-gray-900">User Registration Trends</h2>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <p className="text-sm text-gray-600 mb-1">Total Users</p>
+            <p className="text-3xl font-bold text-blue-600">{stats?.users?.total || 0}</p>
+          </div>
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <p className="text-sm text-gray-600 mb-1">Joined Today</p>
+            <p className="text-3xl font-bold text-green-600">{stats?.users?.new_today || 0}</p>
+            <p className="text-xs text-gray-500 mt-1">{new Date().toLocaleDateString()}</p>
+          </div>
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <p className="text-sm text-gray-600 mb-1">This Week</p>
+            <p className="text-3xl font-bold text-indigo-600">{stats?.users?.new_this_week || 0}</p>
+            <p className="text-xs text-gray-500 mt-1">Last 7 days</p>
+          </div>
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <p className="text-sm text-gray-600 mb-1">This Month</p>
+            <p className="text-3xl font-bold text-purple-600">{stats?.users?.new_this_month || 0}</p>
+            <p className="text-xs text-gray-500 mt-1">{new Date().toLocaleDateString('en-US', { month: 'long' })}</p>
+          </div>
+        </div>
+      </div>
+
       {/* Main stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
@@ -253,8 +284,8 @@ const AdminDashboardPage = () => {
           value={stats?.users?.total}
           icon={Users}
           color="bg-blue-500"
-          subValue={stats?.users?.new_today}
-          subLabel="New today"
+          subValue={`${stats?.users?.new_today || 0} today, ${stats?.users?.new_this_week || 0} this week`}
+          subLabel="New users"
           link="/admin/users"
         />
         <StatCard
