@@ -1,0 +1,23 @@
+{
+  "name": "trust-found",
+  "version": "1.0.0",
+  "description": "Trust-Based Lost & Found Web Application",
+  "author": "Your Name",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/trust-found"
+  },
+  "keywords": [
+    "lost-and-found",
+    "community",
+    "trust",
+    "security",
+    "firebase",
+    "react",
+    "vite"
+  ],
+  "workspaces": [
+    "frontend"
+  ]
+}

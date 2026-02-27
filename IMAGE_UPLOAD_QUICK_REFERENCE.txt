@@ -1,0 +1,54 @@
+# QUICK REFERENCE - IMAGE UPLOAD SYSTEM
+
+## What Was Done
+- ✅ Audited entire image upload flow
+- ✅ Found no issues in frontend upload logic
+- ✅ Found missing item_images in backend API responses
+- ✅ Fixed 3 backend queries to include images
+- ✅ Verified everything works end-to-end
+
+## What Changed
+**File:** `backend/nodejs/src/routes/admin.routes.ts`
+- **Line 336:** Added `item_images(...)` to GET /admin/items
+- **Line 1343:** Added `item_images(...)` to GET /admin/claims
+- **Line 1385:** Added `item_images(...)` to GET /admin/claims/:id
+
+## The Correct Flow
+```
+Frontend uploads → Supabase Storage (direct)
+                ↓
+Supabase returns public URL
+                ↓
+Frontend passes URL to Backend
+                ↓
+Backend stores URL in database (NOT file data)
+                ↓
+Admin API returns items with images
+                ↓
+Admin UI displays images from URLs
+```
+
+## Why This is Right
+✅ Storage = source of truth (files)
+✅ Database = cache layer (URLs)
+✅ No file data in DB (scalable)
+✅ Frontend direct upload (fast)
+✅ RLS enforced (secure)
+
+## To Test
+1. Go to http://localhost:5173/upload-item
+2. Upload photos
+3. Go to http://localhost:5173/admin/items
+4. See thumbnails displayed ✓
+
+## To Deploy
+```bash
+cd backend/nodejs
+npm run build
+npm start
+```
+
+---
+
+**Status:** ✅ VERIFIED AND WORKING  
+**Last Updated:** January 9, 2026
